@@ -1601,6 +1601,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
+name = "sdmm"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "interprocess",
+ "reqwest",
+ "winreg",
+]
+
+[[package]]
 name = "security-framework"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1733,16 +1743,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d4f0e86297cad2658d92a707320d87bf4e6ae1050287f51d19b67ef3f153a7b"
 dependencies = [
  "lock_api",
-]
-
-[[package]]
-name = "stardew-modmanager"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "interprocess",
- "reqwest",
- "winreg",
 ]
 
 [[package]]

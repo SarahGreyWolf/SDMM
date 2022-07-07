@@ -1,9 +1,11 @@
 use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::io;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::thread;
+mod gui;
 fn main() {
     let mut path = Path::new("");
     let mut args = env::args().skip(1);
@@ -40,6 +42,12 @@ fn main() {
             }
         }
     });
+    let native_options = eframe::NativeOptions::default();
+    eframe::run_native(
+        "Stardew Mod Manager",
+        native_options,
+        Box::new(|cc| Box::new(gui::SDMMApp::new(cc))),
+    );
 }
 #[cfg(target_os = "windows")]
 fn setup() -> io::Result<()> {
@@ -68,4 +76,12 @@ fn setup() -> io::Result<()> {
 
 #[cfg(target_os = "linux")]
 fn setup() -> io::Result<()> {
+}
+#[derive(Serialize, Deserialize, Default)]
+struct GameMod {
+    name: String,
+    version: String,
+    author: String,
+    link: String,
+    active: bool,
 }

@@ -1,14 +1,57 @@
+use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
+use std::env;
+use std::io;
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
+use std::thread;
 fn main() {
-    #[cfg(target_os = "windows")]
+    let mut path = Path::new("");
+    let mut args = env::args().skip(1);
+    if let Some(pos_url) = args.next() {
+        if !pos_url.is_empty() {
+            path = Path::new(&pos_url);
+            if path.starts_with("nxm://") {
+                if let Ok(mut stream) = LocalSocketStream::connect("/tmp/sdmm.sock") {
+                    println!("{:?}", stream.peer_pid());
+                    let _ = stream
+                        .write(format!("{}\n", path.display()).as_bytes())
+                        .unwrap();
+                    return;
+                }
+            }
+        }
+    }
     setup().unwrap();
 
+    let listener = LocalSocketListener::bind("/tmp/sdmm.sock").unwrap();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    let mut reader = BufReader::new(stream);
+                    let mut buffer = String::new();
+                    reader.read_line(&mut buffer).unwrap();
+                    // TODO: Handle Downloading here
+                    println!("{}", buffer);
+                }
+                Err(_) => {
+                    break;
+                }
+            }
+        }
+    });
 }
 #[cfg(target_os = "windows")]
 fn setup() -> io::Result<()> {
+    use winreg::enums::*;
+    use winreg::RegKey;
     const FRIENDLY_NAME: &str = "NexusMods";
     const URI_SCHEME: &str = "nxm";
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    if let Ok(_) = hkcu.open_subkey(&format!("SOFTWARE\\Classes\\{}", URI_SCHEME)) {
+    if hkcu
+        .open_subkey(&format!("SOFTWARE\\Classes\\{}", URI_SCHEME))
+        .is_ok()
+    {
         return Ok(());
     }
     let (protocol, _) = hkcu.create_subkey(&format!("SOFTWARE\\Classes\\{}", URI_SCHEME))?;

@@ -1,12 +1,13 @@
-use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
+use interprocess::local_socket::LocalSocketStream;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::io;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::Path;
-use std::thread;
 mod gui;
+const PROJECT_NAME: &str = "SDMM";
 fn main() {
+    #[allow(unused_assignments)]
     let mut path = Path::new("");
     let mut args = env::args().skip(1);
     if let Some(pos_url) = args.next() {
@@ -15,9 +16,12 @@ fn main() {
             if path.starts_with("nxm://") {
                 if let Ok(mut stream) = LocalSocketStream::connect("/tmp/sdmm.sock") {
                     println!("{:?}", stream.peer_pid());
-                    let _ = stream
-                        .write(format!("{}\n", path.display()).as_bytes())
-                        .unwrap();
+                    let path_string = path.display().to_string();
+                    let path_bytes = path_string.as_bytes();
+                    let mut bytes = vec![0u8; 1024 - path_bytes.len()];
+                    bytes.append(&mut path_bytes.to_vec());
+                    let _ = stream.write(&bytes).unwrap();
+                    stream.flush().unwrap();
                     return;
                 }
             }
@@ -25,23 +29,6 @@ fn main() {
     }
     setup().unwrap();
 
-    let listener = LocalSocketListener::bind("/tmp/sdmm.sock").unwrap();
-    thread::spawn(move || {
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    let mut reader = BufReader::new(stream);
-                    let mut buffer = String::new();
-                    reader.read_line(&mut buffer).unwrap();
-                    // TODO: Handle Downloading here
-                    println!("{}", buffer);
-                }
-                Err(_) => {
-                    break;
-                }
-            }
-        }
-    });
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
         "Stardew Mod Manager",

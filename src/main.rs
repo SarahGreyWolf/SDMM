@@ -29,9 +29,13 @@ fn main() {
     }
     setup().unwrap();
 
-    let native_options = eframe::NativeOptions::default();
+    let native_options = eframe::NativeOptions {
+        initial_window_size: Some(eframe::emath::vec2(800., 600.)),
+        resizable: false,
+        ..Default::default()
+    };
     eframe::run_native(
-        "Stardew Mod Manager",
+        PROJECT_NAME,
         native_options,
         Box::new(|cc| Box::new(gui::SDMMApp::new(cc))),
     );

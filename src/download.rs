@@ -21,7 +21,7 @@ struct DownloadLink {
     uri: String,
 }
 
-pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize)>, download_path: PathBuf) {
+pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, usize)>, download_path: PathBuf, api_key: String) {
     let base_path = Path::new("api.nexusmods.com/v1/games/");
     let listener = LocalSocketListener::bind("/tmp/sdmm.sock").unwrap();
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -43,16 +43,18 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize)>,
             // Get sent URL string
             let mut buffer = vec![0u8; 1024];
             stream.read_exact(&mut buffer).unwrap();
+            let api_key = api_key.clone();
             runtime.spawn(async move {
                 let sync_sender = sync_sender.clone();
                 let client = reqwest::Client::new();
                 let mut string = String::from_utf8(buffer).unwrap();
                 string = string.replace('\0', "");
                 // Make a request to get the Download URL
+                let mod_id = get_mod_id(&string);
                 let response = client.get(get_download_url(base_path, &string))
                 // This needs to be less static and with a proper API key from Nexus for
                 // the application
-                .header("apikey", "")
+                .header("apikey", api_key)
                 .send().await;
                 match response {
                     Ok(resp) => {
@@ -61,7 +63,7 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize)>,
                             Ok(links) => {
                                 let download = links.0.first().unwrap();
                                 println!("Beginning Download from {:?}", download.uri);
-                                download_file(&client, sync_sender, download, &download_path).await;
+                                download_file(&client, sync_sender, download, &download_path, mod_id).await;
                                 println!("Finished Download of {}", get_filename(&download.uri));
                             }
                             Err(e) => eprintln!("Error Occured: {}", e),
@@ -77,7 +79,13 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize)>,
     });
 }
 
-async fn download_file(client: &reqwest::Client, sync_sender: SyncSender<(String, usize, usize)>, download: &DownloadLink, download_path: &Path) {
+async fn download_file(
+    client: &reqwest::Client,
+    sync_sender: SyncSender<(String, usize, usize, usize)>,
+    download: &DownloadLink,
+    download_path: &Path,
+    mod_id: usize
+) {
     let download_clone = download.clone();
     let download_path_clone = download_path.clone();
     let client = client.clone();
@@ -103,8 +111,8 @@ async fn download_file(client: &reqwest::Client, sync_sender: SyncSender<(String
             File::create(download_path_clone.join(&file_name))
         {
             let mut downloaded: usize = 0;
-            match sync_sender.try_send((file_name.to_string(), downloaded, total_size)) {
-                Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size)) => {
+            match sync_sender.try_send((file_name.to_string(), downloaded, total_size, mod_id)) {
+                Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size, mod_id)) => {
                     panic!("Error Occured when sending: {}", e);
                 }
                 _ => {}
@@ -115,8 +123,8 @@ async fn download_file(client: &reqwest::Client, sync_sender: SyncSender<(String
                     let written = file.write(&chunk).unwrap();
                     assert_eq!(written, chunk.len());
                     downloaded += chunk.len();
-                    match sync_sender.try_send((file_name.to_string(), downloaded, total_size)) {
-                        Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size)) => {
+                    match sync_sender.try_send((file_name.to_string(), downloaded, total_size, mod_id)) {
+                        Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size, mod_id)) => {
                             panic!("Error Occured when sending: {}", e);
                         }
                         _ => {}
@@ -126,7 +134,7 @@ async fn download_file(client: &reqwest::Client, sync_sender: SyncSender<(String
                     return;
                 }
             }
-            sync_sender.send((file_name.to_string(), downloaded, total_size)).unwrap();
+            sync_sender.send((file_name.to_string(), downloaded, total_size, mod_id)).unwrap();
         } else {
             eprintln!("Failed to create file at {}", download_path_clone.join(file_name).display());
         }
@@ -148,6 +156,14 @@ fn get_filename(uri: &str) -> String {
         split_uri[6]
     };
     file_name.split('?').next().unwrap().to_string()
+}
+
+fn get_mod_id(requested_uri: &str) -> usize {
+    if let Some(id_string) = requested_uri.split('/').nth(6) {
+        id_string.parse::<usize>().unwrap_or(0)
+    } else {
+        0
+    }
 }
 
 // Convert URL String in Path, excluding the nxm:// part

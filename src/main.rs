@@ -1,10 +1,9 @@
 use interprocess::local_socket::LocalSocketStream;
-use serde::{Deserialize, Serialize};
 use std::env;
 use std::io;
 use std::io::Write;
 use std::path::Path;
-mod gui;
+mod app;
 mod download;
 const PROJECT_NAME: &str = "SDMM";
 fn main() {
@@ -38,7 +37,7 @@ fn main() {
     eframe::run_native(
         PROJECT_NAME,
         native_options,
-        Box::new(|cc| Box::new(gui::SDMMApp::new(cc))),
+        Box::new(|cc| Box::new(app::SDMMApp::new(cc))),
     );
 }
 #[cfg(target_os = "windows")]
@@ -69,11 +68,4 @@ fn setup() -> io::Result<()> {
 #[cfg(target_os = "linux")]
 fn setup() -> io::Result<()> {
 }
-#[derive(Serialize, Deserialize, Default)]
-struct GameMod {
-    name: String,
-    version: String,
-    author: String,
-    link: String,
-    active: bool,
 }

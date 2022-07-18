@@ -56,11 +56,17 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize)>,
                 .send().await;
                 match response {
                     Ok(resp) => {
-                        let response_body = resp.json::<Links>().await.unwrap();
-                        let download = response_body.0.first().unwrap();
-                        println!("Beginning Download from {:?}", download.uri);
-                        download_file(&client, sync_sender, download, &download_path).await;
-                        println!("Finished Download of {}", get_filename(&download.uri));
+                        let response_body = resp.json::<Links>().await;
+                        match response_body {
+                            Ok(links) => {
+                                let download = links.0.first().unwrap();
+                                println!("Beginning Download from {:?}", download.uri);
+                                download_file(&client, sync_sender, download, &download_path).await;
+                                println!("Finished Download of {}", get_filename(&download.uri));
+                            }
+                            Err(e) => eprintln!("Error Occured: {}", e),
+                        }
+                        
                     }
                     Err(e) => {
                         eprintln!("Error Occured: {}", e);

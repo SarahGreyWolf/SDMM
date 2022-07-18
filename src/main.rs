@@ -5,6 +5,7 @@ use std::io;
 use std::io::Write;
 use std::path::Path;
 mod gui;
+mod download;
 const PROJECT_NAME: &str = "SDMM";
 fn main() {
     #[allow(unused_assignments)]

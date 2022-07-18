@@ -68,4 +68,3 @@ fn setup() -> io::Result<()> {
 #[cfg(target_os = "linux")]
 fn setup() -> io::Result<()> {
 }
-}

@@ -9,14 +9,13 @@ use std::sync::mpsc::{sync_channel, Receiver};
 use std::collections::HashMap;
 use crate::download::handle_download_requests;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 struct GameMod {
     name: String,
     file_name: String,
     version: String,
     author: String,
     link: String,
-    active: bool,
 }
 
 
@@ -31,12 +30,13 @@ enum Menus {
 
 pub struct SDMMApp {
     downloads_receiver: Receiver<(String, usize, usize, usize)>,
+    web_client: reqwest::blocking::Client,
     state: Menus,
     download_path: PathBuf,
     game_path: PathBuf,
     api_key: String,
     needs_key: bool,
-    downloads: HashMap<String, (usize, usize, usize)>,
+    downloads: HashMap<String, (usize, usize, usize, bool)>,
     inactive: Vec<GameMod>,
     active: Vec<GameMod>,
 }
@@ -80,14 +80,6 @@ impl SDMMApp {
         let download_path_clone = download_path.clone();
         handle_download_requests(sync_sender, download_path, api_key.clone());
 
-        inactive.push(GameMod {
-            name: "Content Patcher".into(),
-            file_name: "Content Patcher 1.27.2-1915-1-27-2-1656983440.zip".into(),
-            version: "1.27.2".into(),
-            author: "Pathoschild".into(),
-            link: "https://www.nexusmods.com/stardewvalley/mods/1915".into(),
-            active: false,
-        });
         let mut needs_key = true;
         if !api_key.is_empty() {
             needs_key = false;
@@ -96,6 +88,7 @@ impl SDMMApp {
         // Load all the currently downloaded mods into loaded vec
         SDMMApp {
             downloads_receiver: receiver,
+            web_client: reqwest::blocking::Client::new(),
             state: Menus::default(),
             download_path: download_path_clone,
             game_path,
@@ -109,55 +102,14 @@ impl SDMMApp {
 
     fn mods_display(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.columns(3, |columns| {
-                if let [left_panel, center, right_panel] = &mut columns[0..3] {
+            ui.columns(2, |columns| {
+                if let [left_panel, right_panel] = &mut columns[0..2] {
                     // Left (inactive) Table
                     left_panel.heading("Inactive");
                     left_panel.separator();
                     left_panel.push_id(0, |ui| {
-                        TableBuilder::new(ui)
-                        .cell_layout(
-                            egui::Layout::left_to_right().with_cross_align(egui::Align::Center),
-                        )
-                        .columns(Size::remainder().at_least(5.), 3)
-                        .header(20.0, |mut header| {
-                            header.col(|ui| {
-                                ui.heading("Name");
-                            });
-                            header.col(|ui| {
-                                ui.heading("Version");
-                            });
-                            header.col(|ui| {
-                                ui.heading("Author");
-                            });
-                        })
-                        .body(|mut body| {
-                            for r#mod in &mut self.inactive {
-                                body.row(20., |mut row| {
-                                    row.col(|ui| {
-                                        ui.hyperlink_to(&r#mod.name, &r#mod.link);
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(&r#mod.version);
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(&r#mod.author);
-                                    });
-                                });
-                            }
-                        });
-                    });
-                    // Center Buttons
-                    if center.button("▲").clicked() {}
-                    if center.button("►").clicked() {}
-                    if center.button("◄").clicked() {}
-                    if center.button("▼").clicked() {}
-                    
-                    // Right (active) Table
-                    right_panel.heading("Active");
-                    right_panel.separator();
-                    right_panel.push_id(1, |ui| {
-                        TableBuilder::new(ui)
+                        egui::ScrollArea::vertical().id_source("inactive").show(ui, |ui| {
+                            TableBuilder::new(ui)
                             .cell_layout(
                                 egui::Layout::left_to_right().with_cross_align(egui::Align::Center),
                             )
@@ -174,20 +126,83 @@ impl SDMMApp {
                                 });
                             })
                             .body(|mut body| {
-                                for r#mod in &mut self.active {
+                                for (index, r#mod) in &mut self.inactive.clone().iter().enumerate() {
                                     body.row(20., |mut row| {
                                         row.col(|ui| {
                                             ui.hyperlink_to(&r#mod.name, &r#mod.link);
+                                            let sense = ui.interact(ui.max_rect(), egui::Id::new(&format!("name-inactive{:#}", index)), egui::Sense::click());
+                                            if sense.double_clicked() || sense.triple_clicked() {
+                                                switch_active_inactive(r#mod, index, &mut self.active, &mut self.inactive, false);
+                                            }
                                         });
                                         row.col(|ui| {
                                             ui.label(&r#mod.version);
+                                            let sense = ui.interact(ui.max_rect(), egui::Id::new(&format!("version-inactive{:#}", index)), egui::Sense::click());
+                                            if sense.double_clicked() || sense.triple_clicked() {
+                                                switch_active_inactive(r#mod, index, &mut self.active, &mut self.inactive, false);
+                                            }
                                         });
                                         row.col(|ui| {
                                             ui.label(&r#mod.author);
+                                            let sense = ui.interact(ui.max_rect(), egui::Id::new(&format!("author-inactive{:#}", index)), egui::Sense::click());
+                                            if sense.double_clicked() || sense.triple_clicked() {
+                                                switch_active_inactive(r#mod, index, &mut self.active, &mut self.inactive, false);
+                                            }
                                         });
                                     });
                                 }
                             });
+                        });
+                    });                    
+                    // Right (active) Table
+                    right_panel.heading("Active");
+                    right_panel.separator();
+                    right_panel.push_id(1, |ui| {
+                        egui::ScrollArea::vertical().id_source("active").show(ui, |ui| {
+                            TableBuilder::new(ui)
+                                .cell_layout(
+                                    egui::Layout::left_to_right().with_cross_align(egui::Align::Center),
+                                )
+                                .columns(Size::remainder().at_least(5.), 3)
+                                .header(20.0, |mut header| {
+                                    header.col(|ui| {
+                                        ui.heading("Name");
+                                    });
+                                    header.col(|ui| {
+                                        ui.heading("Version");
+                                    });
+                                    header.col(|ui| {
+                                        ui.heading("Author");
+                                    });
+                                })
+                                .body(|mut body| {
+                                    for (index, r#mod) in &mut self.active.clone().iter().enumerate() {
+                                        body.row(20., |mut row| {
+                                            row.col(|ui| {
+                                                ui.hyperlink_to(&r#mod.name, &r#mod.link);
+                                                let sense = ui.interact(ui.max_rect(), egui::Id::new(&format!("name-active{:#}", index)), egui::Sense::click());
+                                                if sense.double_clicked() || sense.triple_clicked() {
+                                                    switch_active_inactive(r#mod, index, &mut self.active, &mut self.inactive, true);
+                                                }
+                                            });
+                                            row.col(|ui| {
+                                                ui.label(&r#mod.version);
+                                                let sense = ui.interact(ui.max_rect(), egui::Id::new(&format!("version-active{:#}", index)), egui::Sense::click());
+                                                if sense.double_clicked() || sense.triple_clicked() {
+                                                    switch_active_inactive(r#mod, index, &mut self.active, &mut self.inactive, true);
+                                                }
+                                            });
+                                            row.col(|ui| {
+                                                ui.label(&r#mod.author);
+                                                let sense = ui.interact(ui.max_rect(), egui::Id::new(&format!("author-active{:#}", index)), egui::Sense::click());
+                                                if sense.double_clicked() || sense.triple_clicked() {
+                                                    switch_active_inactive(r#mod, index, &mut self.active, &mut self.inactive, true);
+                                                }
+                                            });
+                                        });
+                                    }
+                                });
+                        });
                     });
                 }
             });
@@ -195,27 +210,60 @@ impl SDMMApp {
     }
 
     fn downloads_display(&mut self, ctx: &egui::Context) {
+        let base_path = PathBuf::from(crate::download::BASE_URI);
         for (mod_name, downloaded, total, id) in self.downloads_receiver.try_recv() {
             if !self.downloads.contains_key(&mod_name) {
-                self.downloads.insert(mod_name, (downloaded, total, id));
+                self.downloads.insert(mod_name, (downloaded, total, id, false));
             } else {
                 let download = self.downloads.get_mut(&mod_name).unwrap();
                 if download.0 < downloaded {
-                    *download = (downloaded, total, id)
+                    *download = (downloaded, total, id, false)
                 }
             }
         }
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Downloads");
             ui.separator();
-            for (mod_name, (downloaded, total, id)) in self.downloads.clone().iter() {
+            let mut removal: Vec<String> = vec![];
+            for (mod_name, (downloaded, total, id, saved)) in self.downloads.iter_mut() {
                 ui.heading(mod_name);
-                if ui.button("X").clicked() {
-                    if downloaded == total {
-                        self.downloads.remove(mod_name).unwrap();
+                if downloaded == total {
+                    if ui.button("X").clicked() {
+                        removal.push(mod_name.clone());
+                    }
+                    // FIXME: This requires the user to be on the downloads tab to happen
+                    if !saved.clone() {
+                        let resp = self.web_client.get(format!("https://{}/stardewvalley/mods/{id}.json", base_path.display()))
+                            .header("apikey", self.api_key.clone())
+                            .send();
+                        match resp {
+                            Ok(res) => {
+                                match res.json::<crate::download::ModDetails>() {
+                                    Ok(json) => {
+                                        self.inactive.push(GameMod {
+                                            name: json.name,
+                                            file_name: mod_name.clone(),
+                                            version: json.version,
+                                            author: json.author,
+                                            link: format!("https://www.nexusmods.com/stardewvalley/mods/{id}"),
+                                        });
+                                    },
+                                    Err(e) => {
+                                        eprintln!("Response was not valid json: {e}");
+                                    },
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Request failed: {e}");
+                            },
+                        }
+                        *saved = true;
                     }
                 }
                 ui.add(egui::ProgressBar::new(*downloaded as f32 / *total as f32).animate(true).show_percentage());
+            }
+            for name in removal {
+                self.downloads.remove(&name);
             }
         });
     }
@@ -233,6 +281,17 @@ impl SDMMApp {
             ui.separator();
             ui.heading("COMING SOON");
         });
+    }
+}
+
+fn switch_active_inactive(r#mod: &GameMod, index: usize, active: &mut Vec<GameMod>, inactive: &mut Vec<GameMod>, is_active: bool) {
+    // TODO: Handle activating and deactivating mod on filesystem
+    if is_active {
+        inactive.push(r#mod.clone());
+        active.remove(index);
+    } else {
+        active.push(r#mod.clone());
+        inactive.remove(index);
     }
 }
 

@@ -10,6 +10,8 @@ use std::sync::mpsc::{SyncSender};
 use std::thread;
 use futures_util::StreamExt;
 
+pub const BASE_URI: &str = "api.nexusmods.com/v1/games/";
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 struct Links(Vec<DownloadLink>);
 
@@ -22,7 +24,7 @@ struct DownloadLink {
 }
 
 pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, usize)>, download_path: PathBuf, api_key: String) {
-    let base_path = Path::new("api.nexusmods.com/v1/games/");
+    let base_path = Path::new(BASE_URI);
     let listener = LocalSocketListener::bind("/tmp/sdmm.sock").unwrap();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
@@ -159,7 +161,7 @@ fn get_filename(uri: &str) -> String {
 }
 
 fn get_mod_id(requested_uri: &str) -> usize {
-    if let Some(id_string) = requested_uri.split('/').nth(6) {
+    if let Some(id_string) = requested_uri.split('/').nth(4) {
         id_string.parse::<usize>().unwrap_or(0)
     } else {
         0
@@ -178,4 +180,36 @@ fn get_download_url(base_path: &Path, requested_uri: &str) -> String {
         path.display(),
         &queries
     )
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ModDetails {
+    pub name: String,
+    pub summary: String,
+    pub description: String,
+    pub picture_url: String,
+    pub mod_downloads: u64,
+    pub mod_unique_downloads: u64,
+    pub uid: u64,
+    pub mod_id: u64,
+    pub game_id: u64,
+    pub allow_rating: bool,
+    pub domain_name: String,
+    pub category_id: u64,
+    pub version: String,
+    pub endorsement_count: u64,
+    pub created_timestamp: u64,
+    pub created_time: String,
+    pub updated_timestamp: u64,
+    pub updated_time: String,
+    pub author: String,
+    pub uploaded_by: String,
+    pub uploaded_users_profile_url: String,
+    pub contains_adult_content: bool,
+    pub status: String,
+    pub available: bool,
+    #[serde(skip)]
+    pub user: String,
+    #[serde(skip)]
+    pub endorsement: String,
 }

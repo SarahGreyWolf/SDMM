@@ -2,18 +2,18 @@ use interprocess::local_socket::LocalSocketStream;
 use std::env;
 use std::io;
 use std::io::Write;
-use std::path::Path;
+use std::path::PathBuf;
 mod app;
 mod download;
 const PROJECT_NAME: &str = "SDMM";
 fn main() {
     #[allow(unused_assignments)]
-    let mut path = Path::new("");
+    let mut path = PathBuf::new();
     let mut args = env::args().skip(1);
     if let Some(pos_url) = args.next() {
         if !pos_url.is_empty() {
-            path = Path::new(&pos_url);
-            if path.starts_with("nxm://") {
+            if pos_url.starts_with("nxm://") {
+                path = PathBuf::from(pos_url);
                 if let Ok(mut stream) = LocalSocketStream::connect("/tmp/sdmm.sock") {
                     println!("{:?}", stream.peer_pid());
                     let path_string = path.display().to_string();
@@ -27,17 +27,17 @@ fn main() {
             }
         }
     }
-    setup().unwrap();
 
+    setup().unwrap();
     let native_options = eframe::NativeOptions {
         initial_window_size: Some(eframe::emath::vec2(800., 600.)),
-        resizable: false,
+        resizable: true,
         ..Default::default()
     };
     eframe::run_native(
         PROJECT_NAME,
         native_options,
-        Box::new(|cc| Box::new(app::SDMMApp::new(cc))),
+        Box::new(|cc| Box::new(app::SDMMApp::new(cc, path))),
     );
 }
 #[cfg(target_os = "windows")]

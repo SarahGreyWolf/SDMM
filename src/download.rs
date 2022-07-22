@@ -23,7 +23,7 @@ struct DownloadLink {
     uri: String,
 }
 
-pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, usize)>, download_path: PathBuf, api_key: String) {
+pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, usize)>, download_path: PathBuf, api_key: String, last_download: String) {
     let base_path = Path::new(BASE_URI);
     let listener = LocalSocketListener::bind("/tmp/sdmm.sock").unwrap();
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -35,6 +35,41 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
         .build()
         .unwrap();
     thread::spawn(move || {
+        if !last_download.is_empty() {
+            let download_path = download_path.clone();
+            let sync_sender = sync_sender.clone();
+            // Get sent URL string
+            let api_key = api_key.clone();
+            runtime.spawn(async move {
+                let sync_sender = sync_sender.clone();
+                let client = reqwest::Client::new();
+                // Make a request to get the Download URL
+                let mod_id = get_mod_id(&last_download);
+                let response = client.get(get_download_url(base_path, &last_download))
+                // This needs to be less static and with a proper API key from Nexus for
+                // the application
+                .header("apikey", api_key)
+                .send().await;
+                match response {
+                    Ok(resp) => {
+                        let response_body = resp.json::<Links>().await;
+                        match response_body {
+                            Ok(links) => {
+                                let download = links.0.first().unwrap();
+                                println!("Beginning Download from {:?}", download.uri);
+                                download_file(&client, sync_sender, download, &download_path, mod_id).await;
+                                println!("Finished Download of {}", get_filename(&download.uri));
+                            }
+                            Err(e) => eprintln!("Error Occured: {}", e),
+                        }
+                        
+                    }
+                    Err(e) => {
+                        eprintln!("Error Occured: {}", e);
+                    }
+                }
+            });
+        }
         for stream in listener.incoming() {
             if let Err(e) = &stream {
                 eprintln!("Stream Error: {e}");

@@ -1,6 +1,7 @@
 use crate::download::handle_download_requests;
 use core::panic;
-use std::io;
+use std::io::{self, BufWriter, Write};
+use std::process::{Command, Stdio};
 use directories_next::ProjectDirs;
 use eframe::{egui, CreationContext, Storage};
 use egui_extras::{Size, TableBuilder};
@@ -356,27 +357,42 @@ impl SDMMApp {
         is_active: bool,
     ) {
         if is_active {
-            let mod_path = self.game_path.join("mods").join(&r#mod.folder_name);
+            let mods_path = if r#mod.id != 2400 {
+                self.game_path.join("mods")
+            } else {
+                self.game_path.clone()
+            };
+            let mod_path = mods_path.join(&r#mod.folder_name);
             if let Err(e) = remove_dir_all(mod_path) {
                 eprintln!("Failed to remove mod: {}", e);
             }
             self.inactive.push(r#mod.clone());
             self.active.remove(index);
         } else {
+            let mods_path = if r#mod.id != 2400 {
+                self.game_path.join("mods")
+            } else {
+                self.game_path.clone()
+            };
             let file = File::open(self.download_path.join(&r#mod.zip_name)).unwrap();
             let mut archive = zip::ZipArchive::new(file).unwrap();
             // Get the folder name for the mod
             {
                 let first = archive.by_index(0).unwrap();
-                r#mod.folder_name = first.enclosed_name().unwrap().parent().unwrap().display().to_string();
+                if first.is_dir() {
+                    r#mod.folder_name = first.enclosed_name().unwrap().display().to_string();
+                } else {
+                    r#mod.folder_name = first.enclosed_name().unwrap().parent().unwrap().display().to_string();
+                }
             }
+            // FIXME: Take this off thread
             for i in 0..archive.len() {
                 let mut file = archive.by_index(i).unwrap();
                 let outpath = match file.enclosed_name() {
                     Some(path) => path.to_owned(),
                     None => continue,
                 };
-                let outpath = self.game_path.join("mods").join(outpath);
+                let outpath = mods_path.join(outpath);
 
                 if (*file.name()).ends_with('/') {
                     create_dir_all(&outpath).unwrap();
@@ -391,6 +407,23 @@ impl SDMMApp {
                 }
             }
             // TODO: Handle installing smapi and updating
+            if r#mod.id == 2400 {
+                #[cfg(target_os = "windows")]
+                let executable = mods_path.join(&r#mod.folder_name).join("internal\\windows\\SMAPI.Installer.exe").display().to_string();
+                #[cfg(target_os = "linux")]
+                let executable = mods_path.join(&r#mod.folder_name).join("internal/linux/SMAPI.Installer").display().to_string();
+                let installer = Command::new(executable)
+                    .stdin(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                let mut stdin = installer.stdin.unwrap();
+                let mut writer = BufWriter::new(&mut stdin);
+                writer.write(b"2\n").unwrap();
+                writer.write(self.game_path.display().to_string().as_bytes()).unwrap();
+                writer.write(b"\n").unwrap();
+                writer.write(b"1\n").unwrap();
+                writer.write(b"\n").unwrap();
+            }
             self.active.push(r#mod.clone());
             self.inactive.remove(index);
         }

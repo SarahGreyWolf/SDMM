@@ -1,18 +1,20 @@
 use crate::download::handle_download_requests;
 use core::panic;
+use std::io;
 use directories_next::ProjectDirs;
 use eframe::{egui, CreationContext, Storage};
 use egui_extras::{Size, TableBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::{create_dir, read_dir};
+use std::fs::{create_dir, read_dir, File, create_dir_all, remove_dir_all};
 use std::path::{PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver};
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct GameMod {
     name: String,
-    file_name: String,
+    zip_name: String,
+    folder_name: String,
     version: String,
     author: String,
     link: String,
@@ -40,6 +42,7 @@ pub struct SDMMApp {
     downloads: HashMap<String, (usize, usize, usize, bool)>,
     inactive: Vec<GameMod>,
     active: Vec<GameMod>,
+    // TODO: Add some kind of popups list that show
 }
 
 impl SDMMApp {
@@ -92,7 +95,6 @@ impl SDMMApp {
             last_download = String::new();
         }
 
-        // Load all the currently downloaded mods into loaded vec
         SDMMApp {
             downloads_receiver: receiver,
             web_client: reqwest::blocking::Client::new(),
@@ -141,7 +143,7 @@ impl SDMMApp {
                                     })
                                     .body(|mut body| {
                                         for (index, r#mod) in
-                                            &mut self.inactive.clone().iter().enumerate()
+                                            &mut self.inactive.clone().iter_mut().enumerate()
                                         {
                                             body.row(20., |mut row| {
                                                 row.col(|ui| {
@@ -157,11 +159,9 @@ impl SDMMApp {
                                                     if sense.double_clicked()
                                                         || sense.triple_clicked()
                                                     {
-                                                        switch_active_inactive(
+                                                        self.switch_active_inactive(
                                                             r#mod,
                                                             index,
-                                                            &mut self.active,
-                                                            &mut self.inactive,
                                                             false,
                                                         );
                                                     }
@@ -179,11 +179,9 @@ impl SDMMApp {
                                                     if sense.double_clicked()
                                                         || sense.triple_clicked()
                                                     {
-                                                        switch_active_inactive(
+                                                        self.switch_active_inactive(
                                                             r#mod,
                                                             index,
-                                                            &mut self.active,
-                                                            &mut self.inactive,
                                                             false,
                                                         );
                                                     }
@@ -201,11 +199,9 @@ impl SDMMApp {
                                                     if sense.double_clicked()
                                                         || sense.triple_clicked()
                                                     {
-                                                        switch_active_inactive(
+                                                        self.switch_active_inactive(
                                                             r#mod,
                                                             index,
-                                                            &mut self.active,
-                                                            &mut self.inactive,
                                                             false,
                                                         );
                                                     }
@@ -241,7 +237,7 @@ impl SDMMApp {
                                     })
                                     .body(|mut body| {
                                         for (index, r#mod) in
-                                            &mut self.active.clone().iter().enumerate()
+                                            &mut self.active.clone().iter_mut().enumerate()
                                         {
                                             body.row(20., |mut row| {
                                                 row.col(|ui| {
@@ -257,11 +253,9 @@ impl SDMMApp {
                                                     if sense.double_clicked()
                                                         || sense.triple_clicked()
                                                     {
-                                                        switch_active_inactive(
+                                                        self.switch_active_inactive(
                                                             r#mod,
                                                             index,
-                                                            &mut self.active,
-                                                            &mut self.inactive,
                                                             true,
                                                         );
                                                     }
@@ -279,11 +273,9 @@ impl SDMMApp {
                                                     if sense.double_clicked()
                                                         || sense.triple_clicked()
                                                     {
-                                                        switch_active_inactive(
+                                                        self.switch_active_inactive(
                                                             r#mod,
                                                             index,
-                                                            &mut self.active,
-                                                            &mut self.inactive,
                                                             true,
                                                         );
                                                     }
@@ -301,11 +293,9 @@ impl SDMMApp {
                                                     if sense.double_clicked()
                                                         || sense.triple_clicked()
                                                     {
-                                                        switch_active_inactive(
+                                                        self.switch_active_inactive(
                                                             r#mod,
                                                             index,
-                                                            &mut self.active,
-                                                            &mut self.inactive,
                                                             true,
                                                         );
                                                     }
@@ -358,26 +348,52 @@ impl SDMMApp {
             ui.heading("COMING SOON");
         });
     }
-}
 
-fn switch_active_inactive(
-    r#mod: &GameMod,
-    index: usize,
-    active: &mut Vec<GameMod>,
-    inactive: &mut Vec<GameMod>,
-    is_active: bool,
-) {
-    // TODO: Handle activating and deactivating mod on filesystem
-    if is_active {
-        // TODO: Deactivate mod (delete it from the mods folder)
-        inactive.push(r#mod.clone());
-        active.remove(index);
-    } else {
-        // TODO: Activate mod (extract it to the mods folder)
-        
-        // TOOD: Handle installing smapi and updating
-        active.push(r#mod.clone());
-        inactive.remove(index);
+    fn switch_active_inactive(
+        &mut self,
+        r#mod: &mut GameMod,
+        index: usize,
+        is_active: bool,
+    ) {
+        if is_active {
+            let mod_path = self.game_path.join("mods").join(&r#mod.folder_name);
+            if let Err(e) = remove_dir_all(mod_path) {
+                eprintln!("Failed to remove mod: {}", e);
+            }
+            self.inactive.push(r#mod.clone());
+            self.active.remove(index);
+        } else {
+            let file = File::open(self.download_path.join(&r#mod.zip_name)).unwrap();
+            let mut archive = zip::ZipArchive::new(file).unwrap();
+            // Get the folder name for the mod
+            {
+                let first = archive.by_index(0).unwrap();
+                r#mod.folder_name = first.enclosed_name().unwrap().parent().unwrap().display().to_string();
+            }
+            for i in 0..archive.len() {
+                let mut file = archive.by_index(i).unwrap();
+                let outpath = match file.enclosed_name() {
+                    Some(path) => path.to_owned(),
+                    None => continue,
+                };
+                let outpath = self.game_path.join("mods").join(outpath);
+
+                if (*file.name()).ends_with('/') {
+                    create_dir_all(&outpath).unwrap();
+                } else {
+                    if let Some(p) = outpath.parent() {
+                        if !p.exists() {
+                            create_dir_all(&p).unwrap();
+                        }
+                    }
+                    let mut outfile = File::create(&outpath).unwrap();
+                    io::copy(&mut file, &mut outfile).unwrap();
+                }
+            }
+            // TODO: Handle installing smapi and updating
+            self.active.push(r#mod.clone());
+            self.inactive.remove(index);
+        }
     }
 }
 
@@ -410,7 +426,8 @@ impl eframe::App for SDMMApp {
                         Ok(json) => {
                             self.inactive.push(GameMod {
                                 name: json.name,
-                                file_name: mod_name.clone(),
+                                zip_name: mod_name.clone(),
+                                folder_name: "".into(),
                                 version: json.version,
                                 author: json.author,
                                 link: format!(

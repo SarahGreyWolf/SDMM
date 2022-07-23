@@ -220,9 +220,9 @@ fn get_download_url(base_path: &Path, requested_uri: &str) -> String {
 #[derive(Serialize, Deserialize)]
 pub struct ModDetails {
     pub name: String,
-    pub summary: String,
-    pub description: String,
-    pub picture_url: String,
+    pub summary: Option<String>,
+    pub description: Option<String>,
+    pub picture_url: Option<String>,
     pub mod_downloads: u64,
     pub mod_unique_downloads: u64,
     pub uid: u64,

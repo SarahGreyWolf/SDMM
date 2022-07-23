@@ -130,6 +130,7 @@ impl SDMMApp {
                                         egui::Layout::left_to_right()
                                             .with_cross_align(egui::Align::Center),
                                     )
+                                    .resizable(true)
                                     .columns(Size::remainder().at_least(5.), 3)
                                     .header(20.0, |mut header| {
                                         header.col(|ui| {
@@ -224,6 +225,7 @@ impl SDMMApp {
                                         egui::Layout::left_to_right()
                                             .with_cross_align(egui::Align::Center),
                                     )
+                                    .resizable(true)
                                     .columns(Size::remainder().at_least(5.), 3)
                                     .header(20.0, |mut header| {
                                         header.col(|ui| {
@@ -313,25 +315,27 @@ impl SDMMApp {
 
     fn downloads_display(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Downloads");
-            ui.separator();
-            let mut removal: Vec<String> = vec![];
-            for (mod_name, (downloaded, total, _, _)) in self.downloads.iter_mut() {
-                ui.heading(mod_name);
-                if downloaded == total {
-                    if ui.button("X").clicked() {
-                        removal.push(mod_name.clone());
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.heading("Downloads");
+                ui.separator();
+                let mut removal: Vec<String> = vec![];
+                for (mod_name, (downloaded, total, _, _)) in self.downloads.iter_mut() {
+                    ui.heading(mod_name);
+                    if downloaded == total {
+                        if ui.button("X").clicked() {
+                            removal.push(mod_name.clone());
+                        }
                     }
+                    ui.add(
+                        egui::ProgressBar::new(*downloaded as f32 / *total as f32)
+                            .animate(true)
+                            .show_percentage(),
+                    );
                 }
-                ui.add(
-                    egui::ProgressBar::new(*downloaded as f32 / *total as f32)
-                        .animate(true)
-                        .show_percentage(),
-                );
-            }
-            for name in removal {
-                self.downloads.remove(&name);
-            }
+                for name in removal {
+                    self.downloads.remove(&name);
+                }
+            });
         });
     }
 
@@ -418,11 +422,11 @@ impl SDMMApp {
                     .unwrap();
                 let mut stdin = installer.stdin.unwrap();
                 let mut writer = BufWriter::new(&mut stdin);
-                writer.write(b"2\n").unwrap();
-                writer.write(self.game_path.display().to_string().as_bytes()).unwrap();
-                writer.write(b"\n").unwrap();
-                writer.write(b"1\n").unwrap();
-                writer.write(b"\n").unwrap();
+                writer.write_all(b"2\n").unwrap();
+                writer.write_all(self.game_path.display().to_string().as_bytes()).unwrap();
+                writer.write_all(b"\n").unwrap();
+                writer.write_all(b"1\n").unwrap();
+                writer.write_all(b"\n").unwrap();
             }
             self.active.push(r#mod.clone());
             self.inactive.remove(index);
@@ -455,22 +459,25 @@ impl eframe::App for SDMMApp {
                     .header("apikey", self.api_key.clone())
                     .send();
                 match resp {
-                    Ok(res) => match res.json::<crate::download::ModDetails>() {
-                        Ok(json) => {
-                            self.inactive.push(GameMod {
-                                name: json.name,
-                                zip_name: mod_name.clone(),
-                                folder_name: "".into(),
-                                version: json.version,
-                                author: json.author,
-                                link: format!(
-                                    "https://www.nexusmods.com/stardewvalley/mods/{id}"
-                                ),
-                                id: *id as u64,
-                            });
-                        }
-                        Err(e) => {
-                            eprintln!("Response was not valid json: {e}");
+                    Ok(res) => {
+                        match res.json::<crate::download::ModDetails>() {
+                            Ok(json) => {
+                                self.inactive.push(GameMod {
+                                    name: json.name,
+                                    zip_name: mod_name.clone(),
+                                    folder_name: "".into(),
+                                    version: json.version,
+                                    author: json.author,
+                                    link: format!(
+                                        "https://www.nexusmods.com/stardewvalley/mods/{id}"
+                                    ),
+                                    id: *id as u64,
+                                });
+                            }
+                            Err(e) => {
+                                
+                                eprintln!("Response was not valid json: {e}");
+                            }
                         }
                     },
                     Err(e) => {

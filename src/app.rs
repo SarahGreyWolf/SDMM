@@ -462,6 +462,10 @@ impl eframe::App for SDMMApp {
                     Ok(res) => {
                         match res.json::<crate::download::ModDetails>() {
                             Ok(json) => {
+                                if self.inactive.iter().filter(|m| m.id == json.mod_id).count() > 0
+                                    || self.active.iter().filter(|m| m.id == json.mod_id).count() > 0 {
+                                    continue;
+                                }
                                 self.inactive.push(GameMod {
                                     name: json.name,
                                     zip_name: mod_name.clone(),

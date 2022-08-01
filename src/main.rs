@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 use interprocess::local_socket::LocalSocketStream;
 use std::env;
 use std::io;
@@ -60,7 +61,11 @@ fn setup() -> io::Result<()> {
     icon.set_value("", &"")?;
     let (command, _) = protocol.create_subkey("shell\\open\\command")?;
     let address = env::current_exe().unwrap().display().to_string();
-    let address = address.split_at(4).1;
+    let address = if address.starts_with(r#"\\?\"#) {
+        address.split_at(4).1
+    } else {
+        &address
+    };
     command.set_value("", &format!(r#""{}" "%1""#, address))?;
     Ok(())
 }

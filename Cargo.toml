@@ -8,6 +8,11 @@ license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+
 [dependencies]
 eframe = {version="0.18.0", features=["persistence"]}
 egui_extras = "0.18.0"

@@ -23,7 +23,7 @@ struct DownloadLink {
     uri: String,
 }
 
-pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, usize)>, download_path: PathBuf, api_key: String, last_download: String) {
+pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, usize, usize)>, download_path: PathBuf, api_key: String, last_download: String) {
     let base_path = Path::new(BASE_URI);
     let listener = LocalSocketListener::bind("/tmp/sdmm.sock").unwrap();
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -44,7 +44,7 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
                 let sync_sender = sync_sender.clone();
                 let client = reqwest::Client::new();
                 // Make a request to get the Download URL
-                let mod_id = get_mod_id(&last_download);
+                let (mod_id, file_id) = get_ids(&last_download);
                 let response = client.get(get_download_url(base_path, &last_download))
                 // This needs to be less static and with a proper API key from Nexus for
                 // the application
@@ -57,7 +57,7 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
                             Ok(links) => {
                                 let download = links.0.first().unwrap();
                                 println!("Beginning Download from {:?}", download.uri);
-                                download_file(&client, sync_sender, download, &download_path, mod_id).await;
+                                download_file(&client, sync_sender, download, &download_path, mod_id, file_id).await;
                                 println!("Finished Download of {}", get_filename(&download.uri));
                             }
                             Err(e) => eprintln!("Error Occured: {}", e),
@@ -87,7 +87,7 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
                 let mut string = String::from_utf8(buffer).unwrap();
                 string = string.replace('\0', "");
                 // Make a request to get the Download URL
-                let mod_id = get_mod_id(&string);
+                let (mod_id, file_id) = get_ids(&string);
                 let response = client.get(get_download_url(base_path, &string))
                 // This needs to be less static and with a proper API key from Nexus for
                 // the application
@@ -100,7 +100,7 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
                             Ok(links) => {
                                 let download = links.0.first().unwrap();
                                 println!("Beginning Download from {:?}", download.uri);
-                                download_file(&client, sync_sender, download, &download_path, mod_id).await;
+                                download_file(&client, sync_sender, download, &download_path, mod_id, file_id).await;
                                 println!("Finished Download of {}", get_filename(&download.uri));
                             }
                             Err(e) => eprintln!("Error Occured: {}", e),
@@ -118,10 +118,11 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
 
 async fn download_file(
     client: &reqwest::Client,
-    sync_sender: SyncSender<(String, usize, usize, usize)>,
+    sync_sender: SyncSender<(String, usize, usize, usize, usize)>,
     download: &DownloadLink,
     download_path: &Path,
-    mod_id: usize
+    mod_id: usize,
+    file_id: usize,
 ) {
     let download_clone = download.clone();
     let download_path_clone = download_path.clone();
@@ -148,8 +149,8 @@ async fn download_file(
             File::create(download_path_clone.join(&file_name))
         {
             let mut downloaded: usize = 0;
-            match sync_sender.try_send((file_name.to_string(), downloaded, total_size, mod_id)) {
-                Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size, mod_id)) => {
+            match sync_sender.try_send((file_name.to_string(), downloaded, total_size, mod_id, file_id)) {
+                Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size, mod_id, file_id)) => {
                     panic!("Error Occured when sending: {}", e);
                 }
                 _ => {}
@@ -160,8 +161,8 @@ async fn download_file(
                     let written = file.write(&chunk).unwrap();
                     assert_eq!(written, chunk.len());
                     downloaded += chunk.len();
-                    match sync_sender.try_send((file_name.to_string(), downloaded, total_size, mod_id)) {
-                        Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size, mod_id)) => {
+                    match sync_sender.try_send((file_name.to_string(), downloaded, total_size, mod_id, file_id)) {
+                        Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size, mod_id, file_id)) => {
                             panic!("Error Occured when sending: {}", e);
                         }
                         _ => {}
@@ -171,7 +172,7 @@ async fn download_file(
                     return;
                 }
             }
-            sync_sender.send((file_name.to_string(), downloaded, total_size, mod_id)).unwrap();
+            sync_sender.send((file_name.to_string(), downloaded, total_size, mod_id, file_id)).unwrap();
         } else {
             eprintln!("Failed to create file at {}", download_path_clone.join(file_name).display());
         }
@@ -195,12 +196,17 @@ fn get_filename(uri: &str) -> String {
     file_name.split('?').next().unwrap().to_string()
 }
 
-fn get_mod_id(requested_uri: &str) -> usize {
+fn get_ids(requested_uri: &str) -> (usize, usize) {
+    let mut mod_id = 0usize;
+    let mut file_id = 0usize;
     if let Some(id_string) = requested_uri.split('/').nth(4) {
-        id_string.parse::<usize>().unwrap_or(0)
-    } else {
-        0
+        mod_id = id_string.parse::<usize>().unwrap_or(0);
     }
+    if let Some(id_string) = requested_uri.split('/').nth(6) {
+        let id: Vec<&str> = id_string.split('?').collect();
+        file_id = id[0].parse::<usize>().unwrap_or(0);
+    }
+    (mod_id, file_id)
 }
 
 // Convert URL String in Path, excluding the nxm:// part
@@ -217,7 +223,7 @@ fn get_download_url(base_path: &Path, requested_uri: &str) -> String {
     )
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct ModDetails {
     pub name: String,
     pub summary: Option<String>,
@@ -247,4 +253,27 @@ pub struct ModDetails {
     pub user: String,
     #[serde(skip)]
     pub endorsement: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ModFileDetails {
+    pub id: Vec<Option<u64>>,
+    pub uid: Option<u64>,
+    pub file_id: Option<u64>,
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub category_id: Option<u64>,
+    pub category_name: Option<String>,
+    pub is_primary: Option<bool>,
+    pub size: Option<u64>,
+    pub file_name: Option<String>,
+    pub uploaded_timestamp: Option<u64>,
+    pub uploaded_time: Option<String>,
+    pub mod_version: Option<String>,
+    pub external_virus_scan_url: Option<String>,
+    pub description: Option<String>,
+    pub size_kb: Option<u64>,
+    pub size_in_bytes: Option<u64>,
+    pub changelog_html: Option<String>,
+    pub content_preview_link: Option<String>
 }

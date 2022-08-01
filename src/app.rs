@@ -1,15 +1,27 @@
-use crate::download::handle_download_requests;
+use crate::download::{handle_download_requests, ModDetails, ModFileDetails};
 use core::panic;
-use std::io::{self, BufWriter, Write};
-use std::process::{Command, Stdio};
 use directories_next::ProjectDirs;
 use eframe::{egui, CreationContext, Storage};
 use egui_extras::{Size, TableBuilder};
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::{create_dir, read_dir, File, create_dir_all, remove_dir_all};
-use std::path::{PathBuf};
+use std::fs::{create_dir, create_dir_all, read_dir, remove_dir_all, File};
+use std::io::{self, BufWriter, Write};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{sync_channel, Receiver};
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct DepGameMod {
+    name: String,
+    zip_name: String,
+    folder_name: String,
+    version: String,
+    author: String,
+    link: String,
+    id: u64
+}
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct GameMod {
@@ -19,7 +31,8 @@ struct GameMod {
     version: String,
     author: String,
     link: String,
-    id: u64,
+    mod_id: u64,
+    file_id: u64
 }
 
 #[derive(Default, PartialEq)]
@@ -32,7 +45,7 @@ enum Menus {
 }
 
 pub struct SDMMApp {
-    downloads_receiver: Receiver<(String, usize, usize, usize)>,
+    downloads_receiver: Receiver<(String, usize, usize, usize, usize)>,
     web_client: reqwest::blocking::Client,
     state: Menus,
     download_path: PathBuf,
@@ -40,7 +53,7 @@ pub struct SDMMApp {
     last_download: PathBuf,
     api_key: String,
     needs_key: bool,
-    downloads: HashMap<String, (usize, usize, usize, bool)>,
+    downloads: HashMap<String, (usize, usize, usize, usize, bool)>,
     inactive: Vec<GameMod>,
     active: Vec<GameMod>,
     // TODO: Add some kind of popups list that show
@@ -69,13 +82,15 @@ impl SDMMApp {
 
         let download_path = setup_download_path(context);
 
+        let web_client = reqwest::blocking::Client::new();
+
         let mut active: Vec<GameMod> = vec![];
         let mut inactive: Vec<GameMod> = vec![];
         let mut game_path = PathBuf::new();
         let mut last_download = download.display().to_string();
         let mut api_key = String::new();
         if let Some(storage) = context.storage {
-            let loaded = load_from_storage(storage);
+            let loaded = load_from_storage(storage, &web_client);
             active = loaded.0;
             inactive = loaded.1;
             game_path = loaded.2;
@@ -85,10 +100,15 @@ impl SDMMApp {
             api_key = loaded.4;
         }
 
-        let (sync_sender, receiver) = sync_channel::<(String, usize, usize, usize)>(1);
+        let (sync_sender, receiver) = sync_channel::<(String, usize, usize, usize, usize)>(1);
         let download_path_clone = download_path.clone();
         // TODO: Continue downloads that weren't finished previously?
-        handle_download_requests(sync_sender, download_path, api_key.clone(), last_download.clone());
+        handle_download_requests(
+            sync_sender,
+            download_path,
+            api_key.clone(),
+            last_download.clone(),
+        );
 
         let mut needs_key = true;
         if !api_key.is_empty() {
@@ -98,7 +118,7 @@ impl SDMMApp {
 
         SDMMApp {
             downloads_receiver: receiver,
-            web_client: reqwest::blocking::Client::new(),
+            web_client,
             state: Menus::default(),
             download_path: download_path_clone,
             game_path,
@@ -162,9 +182,7 @@ impl SDMMApp {
                                                         || sense.triple_clicked()
                                                     {
                                                         self.switch_active_inactive(
-                                                            r#mod,
-                                                            index,
-                                                            false,
+                                                            r#mod, index, false,
                                                         );
                                                     }
                                                 });
@@ -182,9 +200,7 @@ impl SDMMApp {
                                                         || sense.triple_clicked()
                                                     {
                                                         self.switch_active_inactive(
-                                                            r#mod,
-                                                            index,
-                                                            false,
+                                                            r#mod, index, false,
                                                         );
                                                     }
                                                 });
@@ -202,9 +218,7 @@ impl SDMMApp {
                                                         || sense.triple_clicked()
                                                     {
                                                         self.switch_active_inactive(
-                                                            r#mod,
-                                                            index,
-                                                            false,
+                                                            r#mod, index, false,
                                                         );
                                                     }
                                                 });
@@ -257,9 +271,7 @@ impl SDMMApp {
                                                         || sense.triple_clicked()
                                                     {
                                                         self.switch_active_inactive(
-                                                            r#mod,
-                                                            index,
-                                                            true,
+                                                            r#mod, index, true,
                                                         );
                                                     }
                                                 });
@@ -277,9 +289,7 @@ impl SDMMApp {
                                                         || sense.triple_clicked()
                                                     {
                                                         self.switch_active_inactive(
-                                                            r#mod,
-                                                            index,
-                                                            true,
+                                                            r#mod, index, true,
                                                         );
                                                     }
                                                 });
@@ -297,9 +307,7 @@ impl SDMMApp {
                                                         || sense.triple_clicked()
                                                     {
                                                         self.switch_active_inactive(
-                                                            r#mod,
-                                                            index,
-                                                            true,
+                                                            r#mod, index, true,
                                                         );
                                                     }
                                                 });
@@ -319,16 +327,18 @@ impl SDMMApp {
                 ui.heading("Downloads");
                 ui.separator();
                 let mut removal: Vec<String> = vec![];
-                for (mod_name, (downloaded, total, _, _)) in self.downloads.iter_mut() {
+                for (mod_name, (downloaded, total, _, _, _)) in self.downloads.iter_mut() {
                     ui.heading(mod_name);
+                    let mut animate = true;
                     if downloaded == total {
                         if ui.button("X").clicked() {
                             removal.push(mod_name.clone());
                         }
+                        animate = false;
                     }
                     ui.add(
                         egui::ProgressBar::new(*downloaded as f32 / *total as f32)
-                            .animate(true)
+                            .animate(animate)
                             .show_percentage(),
                     );
                 }
@@ -354,14 +364,9 @@ impl SDMMApp {
         });
     }
 
-    fn switch_active_inactive(
-        &mut self,
-        r#mod: &mut GameMod,
-        index: usize,
-        is_active: bool,
-    ) {
+    fn switch_active_inactive(&mut self, r#mod: &mut GameMod, index: usize, is_active: bool) {
         if is_active {
-            let mods_path = if r#mod.id != 2400 {
+            let mods_path = if r#mod.mod_id != 2400 {
                 self.game_path.join("mods")
             } else {
                 self.game_path.clone()
@@ -373,7 +378,7 @@ impl SDMMApp {
             self.inactive.push(r#mod.clone());
             self.active.remove(index);
         } else {
-            let mods_path = if r#mod.id != 2400 {
+            let mods_path = if r#mod.mod_id != 2400 {
                 self.game_path.join("mods")
             } else {
                 self.game_path.clone()
@@ -386,7 +391,13 @@ impl SDMMApp {
                 if first.is_dir() {
                     r#mod.folder_name = first.enclosed_name().unwrap().display().to_string();
                 } else {
-                    r#mod.folder_name = first.enclosed_name().unwrap().parent().unwrap().display().to_string();
+                    r#mod.folder_name = first
+                        .enclosed_name()
+                        .unwrap()
+                        .parent()
+                        .unwrap()
+                        .display()
+                        .to_string();
                 }
             }
             // FIXME: Take this off thread
@@ -411,11 +422,19 @@ impl SDMMApp {
                 }
             }
             // TODO: Handle installing smapi and updating
-            if r#mod.id == 2400 {
+            if r#mod.mod_id == 2400 {
                 #[cfg(target_os = "windows")]
-                let executable = mods_path.join(&r#mod.folder_name).join("internal\\windows\\SMAPI.Installer.exe").display().to_string();
+                let executable = mods_path
+                    .join(&r#mod.folder_name)
+                    .join("internal\\windows\\SMAPI.Installer.exe")
+                    .display()
+                    .to_string();
                 #[cfg(target_os = "linux")]
-                let executable = mods_path.join(&r#mod.folder_name).join("internal/linux/SMAPI.Installer").display().to_string();
+                let executable = mods_path
+                    .join(&r#mod.folder_name)
+                    .join("internal/linux/SMAPI.Installer")
+                    .display()
+                    .to_string();
                 let installer = Command::new(executable)
                     .stdin(Stdio::piped())
                     .spawn()
@@ -423,7 +442,9 @@ impl SDMMApp {
                 let mut stdin = installer.stdin.unwrap();
                 let mut writer = BufWriter::new(&mut stdin);
                 writer.write_all(b"2\n").unwrap();
-                writer.write_all(self.game_path.display().to_string().as_bytes()).unwrap();
+                writer
+                    .write_all(self.game_path.display().to_string().as_bytes())
+                    .unwrap();
                 writer.write_all(b"\n").unwrap();
                 writer.write_all(b"1\n").unwrap();
                 writer.write_all(b"\n").unwrap();
@@ -437,51 +458,79 @@ impl SDMMApp {
 impl eframe::App for SDMMApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let base_path = PathBuf::from(crate::download::BASE_URI);
-        for (mod_name, downloaded, total, id) in self.downloads_receiver.try_recv() {
+        for (mod_name, downloaded, total, mod_id, file_id) in self.downloads_receiver.try_recv() {
             if !self.downloads.contains_key(&mod_name) {
                 self.downloads
-                    .insert(mod_name, (downloaded, total, id, false));
+                    .insert(mod_name, (downloaded, total, mod_id, file_id, false));
             } else {
                 let download = self.downloads.get_mut(&mod_name).unwrap();
                 if download.0 < downloaded {
-                    *download = (downloaded, total, id, false)
+                    *download = (downloaded, total, mod_id, file_id, false)
                 }
             }
         }
-        for (mod_name, (downloaded, total, id, saved)) in self.downloads.iter_mut() {
+        for (mod_name, (downloaded, total, mod_id, file_id, saved)) in self.downloads.iter_mut() {
             if downloaded == total && !saved.clone() {
                 let resp = self
                     .web_client
                     .get(format!(
-                        "https://{}/stardewvalley/mods/{id}.json",
+                        "https://{}/stardewvalley/mods/{mod_id}.json",
                         base_path.display()
                     ))
                     .header("apikey", self.api_key.clone())
                     .send();
-                match resp {
+                let mod_details: ModDetails = match resp {
                     Ok(res) => {
-                        match res.json::<crate::download::ModDetails>() {
-                            Ok(json) => {
-                                if self.inactive.iter().filter(|m| m.id == json.mod_id).count() > 0
-                                    || self.active.iter().filter(|m| m.id == json.mod_id).count() > 0 {
-                                    continue;
-                                }
-                                self.inactive.push(GameMod {
-                                    name: json.name,
-                                    zip_name: mod_name.clone(),
-                                    folder_name: "".into(),
-                                    version: json.version,
-                                    author: json.author,
-                                    link: format!(
-                                        "https://www.nexusmods.com/stardewvalley/mods/{id}"
-                                    ),
-                                    id: *id as u64,
-                                });
+                        if let Ok(details) = res.json::<ModDetails>() {
+                            details
+                        } else {
+                            ModDetails::default()
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Error getting mod details: {e}");
+                        continue;
+                    },
+                };
+                let resp = self
+                    .web_client
+                    .get(format!(
+                        "https://{}/stardewvalley/mods/{mod_id}/files/{file_id}.json",
+                        base_path.display(), 
+                    ))
+                    .header("apikey", self.api_key.clone())
+                    .send();
+                match resp {
+                    Ok(res) => match res.json::<crate::download::ModFileDetails>() {
+                        Ok(json) => {
+                            if self
+                                .inactive
+                                .iter()
+                                .filter(|m| m.mod_id == *mod_id as u64 && m.version == json.version.clone().unwrap_or(String::from("0")))
+                                .count()
+                                > 0
+                                || self
+                                    .active
+                                    .iter()
+                                    .filter(|m| m.mod_id == *mod_id as u64 && m.version == json.version.clone().unwrap_or(String::from("0")))
+                                    .count()
+                                    > 0
+                            {
+                                continue;
                             }
-                            Err(e) => {
-                                
-                                eprintln!("Response was not valid json: {e}");
-                            }
+                            self.inactive.push(GameMod {
+                                name: mod_details.name,
+                                zip_name: mod_name.clone(),
+                                folder_name: "".into(),
+                                version: json.version.unwrap(),
+                                author: mod_details.author,
+                                link: format!("https://www.nexusmods.com/stardewvalley/mods/{mod_id}"),
+                                mod_id: *mod_id as u64,
+                                file_id: *file_id as u64,
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("Response was not valid json: {e}");
                         }
                     },
                     Err(e) => {
@@ -532,19 +581,17 @@ impl eframe::App for SDMMApp {
     }
 }
 
-fn load_from_storage(storage: &dyn Storage) -> (Vec<GameMod>, Vec<GameMod>, PathBuf, String, String) {
+fn load_from_storage(
+    storage: &dyn Storage,
+    web_client: &Client
+) -> (Vec<GameMod>, Vec<GameMod>, PathBuf, String, String) {
+    let base_path = PathBuf::from(crate::download::BASE_URI);
+
     let mut active_mods: Vec<GameMod> = vec![];
     let mut inactive_mods: Vec<GameMod> = vec![];
     let mut game_path = PathBuf::new();
     let mut last_download = String::new();
     let mut api_key = String::new();
-    // TODO: Make a request to check the status of the mods, check for different/newer version
-    if let Some(active) = eframe::get_value(storage, "active_mods") {
-        active_mods = active;
-    }
-    if let Some(inactive) = eframe::get_value(storage, "inactive_mods") {
-        inactive_mods = inactive;
-    }
     if let Some(path) = eframe::get_value(storage, "game_path") {
         game_path = path;
     } else {
@@ -567,7 +614,128 @@ fn load_from_storage(storage: &dyn Storage) -> (Vec<GameMod>, Vec<GameMod>, Path
         // TODO: SOME KIND OF REQUEST FOR APIKEY
     }
 
-    (active_mods, inactive_mods, game_path, last_download, api_key)
+    #[derive(Deserialize, Serialize)]
+    struct ModFileDetailsVec{
+        pub files: Vec<ModFileDetails>
+    }
+
+    // TODO: Make a request to check the status of the mods, check for different/newer version
+    if let Some(active) = eframe::get_value(storage, "active_mods") {
+        active_mods = active;
+    }
+
+    if let Some(active_old) = eframe::get_value::<Vec<DepGameMod>>(storage, "active_mods") {
+        'main: for old in active_old {
+            let resp = web_client
+                .get(format!(
+                    "https://{}/stardewvalley/mods/{}/files.json",
+                    base_path.display(),
+                    old.id,
+                ))
+                .header("apikey", api_key.clone())
+                .send();
+
+            match resp {
+                Ok(res) => match res.json::<ModFileDetailsVec>() {
+                    Ok(details) => {
+                        for dets in details.files {
+                            if dets.file_name.unwrap() == old.zip_name && dets.version.unwrap() == old.version {
+                                active_mods.push(GameMod {
+                                    name: old.name.clone(),
+                                    zip_name: old.zip_name.clone(),
+                                    folder_name: old.folder_name.clone(),
+                                    version: old.version.clone(),
+                                    author: old.author.clone(),
+                                    link: old.link.clone(),
+                                    mod_id: old.id,
+                                    file_id: dets.file_id.unwrap_or(0),
+                                });
+                                continue 'main;
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to serialize Vec<ModFileDetails>: {e}");
+                    },
+                }, 
+                Err(e) => {
+                    eprintln!("Failed to get files: {e}");
+                },
+            }
+            active_mods.push(GameMod {
+                name: old.name,
+                zip_name: old.zip_name,
+                folder_name: old.folder_name,
+                version: old.version,
+                author: old.author,
+                link: old.link,
+                mod_id: old.id,
+                file_id: 0,
+            });
+        }
+    }
+    if let Some(inactive) = eframe::get_value(storage, "inactive_mods") {
+        inactive_mods = inactive;
+    }
+    if let Some(inactive_old) = eframe::get_value::<Vec<DepGameMod>>(storage, "inactive_mods") {
+        'main: for old in inactive_old {
+            let resp = web_client
+                .get(format!(
+                    "https://{}/stardewvalley/mods/{}/files.json",
+                    base_path.display(),
+                    old.id,
+                ))
+                .header("apikey", api_key.clone())
+                .send();
+
+            match resp {
+                Ok(res) => 
+                match res.json::<ModFileDetailsVec>() {
+                    Ok(details) => {
+                        for dets in details.files {
+                            if dets.file_name.unwrap() == old.zip_name && dets.version.unwrap() == old.version {
+                                inactive_mods.push(GameMod {
+                                    name: old.name.clone(),
+                                    zip_name: old.zip_name.clone(),
+                                    folder_name: old.folder_name.clone(),
+                                    version: old.version.clone(),
+                                    author: old.author.clone(),
+                                    link: old.link.clone(),
+                                    mod_id: old.id,
+                                    file_id: dets.file_id.unwrap_or(0),
+                                });
+                                continue 'main;
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to serialize Vec<ModFileDetails>: {e}")
+                    },
+                }, 
+                Err(e) => {
+                    eprintln!("Failed to get files: {e}")
+                },
+            }
+            inactive_mods.push(GameMod {
+                name: old.name,
+                zip_name: old.zip_name,
+                folder_name: old.folder_name,
+                version: old.version,
+                author: old.author,
+                link: old.link,
+                mod_id: old.id,
+                file_id: 0,
+            });
+        }
+    }
+
+    (
+        active_mods,
+        inactive_mods,
+        game_path,
+        last_download,
+        api_key,
+    )
 }
 
 fn setup_download_path(context: &CreationContext<'_>) -> PathBuf {

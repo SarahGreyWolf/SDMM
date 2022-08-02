@@ -12,19 +12,17 @@ fn main() {
     let mut path = PathBuf::new();
     let mut args = env::args().skip(1);
     if let Some(pos_url) = args.next() {
-        if !pos_url.is_empty() {
-            if pos_url.starts_with("nxm://") {
-                path = PathBuf::from(pos_url);
-                if let Ok(mut stream) = LocalSocketStream::connect("/tmp/sdmm.sock") {
-                    println!("{:?}", stream.peer_pid());
-                    let path_string = path.display().to_string();
-                    let path_bytes = path_string.as_bytes();
-                    let mut bytes = vec![0u8; 1024 - path_bytes.len()];
-                    bytes.append(&mut path_bytes.to_vec());
-                    let _ = stream.write(&bytes).unwrap();
-                    stream.flush().unwrap();
-                    return;
-                }
+        if !pos_url.is_empty() && pos_url.starts_with("nxm://") {
+            path = PathBuf::from(pos_url);
+            if let Ok(mut stream) = LocalSocketStream::connect("/tmp/sdmm.sock") {
+                println!("{:?}", stream.peer_pid());
+                let path_string = path.display().to_string();
+                let path_bytes = path_string.as_bytes();
+                let mut bytes = vec![0u8; 1024 - path_bytes.len()];
+                bytes.append(&mut path_bytes.to_vec());
+                let _ = stream.write(&bytes).unwrap();
+                stream.flush().unwrap();
+                return;
             }
         }
     }

@@ -5,7 +5,7 @@ use eframe::{egui, CreationContext, Storage};
 use egui_extras::{Size, TableBuilder};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 use std::fs::{create_dir, create_dir_all, read_dir, remove_dir_all, File};
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
@@ -134,7 +134,7 @@ impl SDMMApp {
     fn mods_display(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.columns(2, |columns| {
-                if columns.len() == 0 {
+                if !columns.is_empty() {
                     panic!("Expected 2 columns, 0 were given");
                 }
                 if let [left_panel, right_panel] = &mut columns[0..2] {
@@ -459,9 +459,9 @@ impl eframe::App for SDMMApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let base_path = PathBuf::from(crate::download::BASE_URI);
         for (mod_name, downloaded, total, mod_id, file_id) in self.downloads_receiver.try_recv() {
-            if !self.downloads.contains_key(&mod_name) {
-                self.downloads
-                    .insert(mod_name, (downloaded, total, mod_id, file_id, false));
+            // if !self.downloads.contains_key(&mod_name) {
+            if let Entry::Vacant(e) = self.downloads.entry(mod_name.clone()) {
+                e.insert((downloaded, total, mod_id, file_id, false));
             } else {
                 let download = self.downloads.get_mut(&mod_name).unwrap();
                 if download.0 < downloaded {
@@ -470,7 +470,7 @@ impl eframe::App for SDMMApp {
             }
         }
         for (mod_name, (downloaded, total, mod_id, file_id, saved)) in self.downloads.iter_mut() {
-            if downloaded == total && !saved.clone() {
+            if downloaded == total && !*saved {
                 let resp = self
                     .web_client
                     .get(format!(
@@ -506,13 +506,13 @@ impl eframe::App for SDMMApp {
                             if self
                                 .inactive
                                 .iter()
-                                .filter(|m| m.mod_id == *mod_id as u64 && m.version == json.version.clone().unwrap_or(String::from("0")))
+                                .filter(|m| m.mod_id == *mod_id as u64 && m.version == json.version.clone().unwrap_or_else(|| String::from("0")))
                                 .count()
                                 > 0
                                 || self
                                     .active
                                     .iter()
-                                    .filter(|m| m.mod_id == *mod_id as u64 && m.version == json.version.clone().unwrap_or(String::from("0")))
+                                    .filter(|m| m.mod_id == *mod_id as u64 && m.version == json.version.clone().unwrap_or_else(|| String::from("0")))
                                     .count()
                                     > 0
                             {
@@ -555,11 +555,9 @@ impl eframe::App for SDMMApp {
                 ui.heading("A valid NexusMods API Key is currently needed to use this program, please provide one and restart.");
                 ui.hyperlink_to("Can be found at the bottom of this page", "https://www.nexusmods.com/users/myaccount?tab=api+access");
                 let _ = ui.add(egui::TextEdit::singleline(&mut self.api_key));
-                if ui.button("Submit").clicked() || ui.input().key_pressed(egui::Key::Enter) {
-                    if !self.api_key.is_empty() {
-                        self.needs_key = false;
-                        frame.quit();
-                    }
+                if ui.button("Submit").clicked() || ui.input().key_pressed(egui::Key::Enter) && !self.api_key.is_empty() {
+                    self.needs_key = false;
+                    frame.quit();
                 }
             });
         }

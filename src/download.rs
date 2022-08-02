@@ -125,7 +125,7 @@ async fn download_file(
     file_id: usize,
 ) {
     let download_clone = download.clone();
-    let download_path_clone = download_path.clone();
+    // let download_path_clone = download_path.clone();
     let client = client.clone();
     let sync_sender = sync_sender.clone();
     let res = client.get(&download_clone.uri).send().await;
@@ -146,7 +146,7 @@ async fn download_file(
         }
         let file_name = get_filename(&download_clone.uri);
         if let Ok(mut file) =
-            File::create(download_path_clone.join(&file_name))
+            File::create(download_path.join(&file_name))
         {
             let mut downloaded: usize = 0;
             match sync_sender.try_send((file_name.to_string(), downloaded, total_size, mod_id, file_id)) {
@@ -168,13 +168,13 @@ async fn download_file(
                         _ => {}
                     }
                 } else {
-                    eprintln!("Failed to create file at {}", download_path_clone.join(file_name).display());
+                    eprintln!("Failed to create file at {}", download_path.join(file_name).display());
                     return;
                 }
             }
             sync_sender.send((file_name.to_string(), downloaded, total_size, mod_id, file_id)).unwrap();
         } else {
-            eprintln!("Failed to create file at {}", download_path_clone.join(file_name).display());
+            eprintln!("Failed to create file at {}", download_path.join(file_name).display());
         }
     } else {
         eprintln!(

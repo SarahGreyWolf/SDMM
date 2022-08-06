@@ -10,6 +10,7 @@ license = "MIT"
 
 [profile.release]
 opt-level = "z"
+codegen-units = 1
 lto = true
 strip = true
 
@@ -17,7 +18,7 @@ strip = true
 eframe = {version="0.18.0", features=["persistence"]}
 egui_extras = "0.18.0"
 # Only select needed features later
-tokio = {version="1.20.0", features=["full"]}
+tokio = {version="1.20.0", default-features=false}
 reqwest = {version="0.11.11", features=["json", "stream", "blocking"]}
 interprocess = "1.1.1"
 serde = {version="1.0.138", features=["derive"]}
@@ -25,7 +26,7 @@ serde_json = "1.0"
 directories-next = "2.0.0"
 futures-util = "0.3.21"
 zip = "0.6.2"
-rfd = "0.9.1"
+rfd = "0.10.0"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.10.1"

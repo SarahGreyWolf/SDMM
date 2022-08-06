@@ -6,7 +6,7 @@ use egui_extras::{Size, TableBuilder};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, hash_map::Entry};
-use std::fs::{create_dir, create_dir_all, read_dir, remove_dir_all, File};
+use std::fs::{create_dir, create_dir_all, read_dir, remove_dir_all, remove_file, File};
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -134,7 +134,7 @@ impl SDMMApp {
     fn mods_display(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.columns(2, |columns| {
-                if !columns.is_empty() {
+                if columns.is_empty() {
                     panic!("Expected 2 columns, 0 were given");
                 }
                 if let [left_panel, right_panel] = &mut columns[0..2] {
@@ -147,8 +147,7 @@ impl SDMMApp {
                             .show(ui, |ui| {
                                 TableBuilder::new(ui)
                                     .cell_layout(
-                                        egui::Layout::left_to_right()
-                                            .with_cross_align(egui::Align::Center),
+                                        egui::Layout::left_to_right().with_cross_align(egui::Align::Center),
                                     )
                                     .resizable(true)
                                     .columns(Size::remainder().at_least(5.), 3)
@@ -185,6 +184,7 @@ impl SDMMApp {
                                                             r#mod, index, false,
                                                         );
                                                     }
+                                                    self.show_context_menu(sense, r#mod, index, false);
                                                 });
                                                 row.col(|ui| {
                                                     ui.label(&r#mod.version);
@@ -203,6 +203,7 @@ impl SDMMApp {
                                                             r#mod, index, false,
                                                         );
                                                     }
+                                                    self.show_context_menu(sense, r#mod, index, false);
                                                 });
                                                 row.col(|ui| {
                                                     ui.label(&r#mod.author);
@@ -221,6 +222,7 @@ impl SDMMApp {
                                                             r#mod, index, false,
                                                         );
                                                     }
+                                                    self.show_context_menu(sense, r#mod, index, false);
                                                 });
                                             });
                                         }
@@ -236,8 +238,7 @@ impl SDMMApp {
                             .show(ui, |ui| {
                                 TableBuilder::new(ui)
                                     .cell_layout(
-                                        egui::Layout::left_to_right()
-                                            .with_cross_align(egui::Align::Center),
+                                        egui::Layout::left_to_right().with_cross_align(egui::Align::Center),
                                     )
                                     .resizable(true)
                                     .columns(Size::remainder().at_least(5.), 3)
@@ -274,6 +275,7 @@ impl SDMMApp {
                                                             r#mod, index, true,
                                                         );
                                                     }
+                                                    self.show_context_menu(sense, r#mod, index, true);
                                                 });
                                                 row.col(|ui| {
                                                     ui.label(&r#mod.version);
@@ -292,6 +294,7 @@ impl SDMMApp {
                                                             r#mod, index, true,
                                                         );
                                                     }
+                                                    self.show_context_menu(sense, r#mod, index, true);
                                                 });
                                                 row.col(|ui| {
                                                     ui.label(&r#mod.author);
@@ -310,6 +313,7 @@ impl SDMMApp {
                                                             r#mod, index, true,
                                                         );
                                                     }
+                                                    self.show_context_menu(sense, r#mod, index, true);
                                                 });
                                             });
                                         }
@@ -318,6 +322,34 @@ impl SDMMApp {
                     });
                 }
             });
+        });
+    }
+
+    fn show_context_menu(&mut self, sense: egui::Response, r#mod: &mut GameMod, index: usize, is_active: bool) {
+        sense.context_menu(|ui| {
+            let text = if is_active {
+                "Disable"
+            } else {
+                "Enable"
+            };
+            if ui.button(text).clicked() {
+                self.switch_active_inactive(r#mod, index, is_active);
+            }
+            if ui.button("Delete").clicked() {
+                if is_active {
+                    self.switch_active_inactive(r#mod, index, is_active);
+                }
+                for (i, gmod) in self.inactive.iter().enumerate() {
+                    if gmod.name == r#mod.name && gmod.version == r#mod.version {
+                        self.inactive.remove(i);
+                        break;
+                    }
+                }
+                let mod_path = self.download_path.join(&r#mod.zip_name);
+                if let Err(e) = remove_file(&mod_path) {
+                    eprintln!("Failed to delete mod {} at {}: {}", r#mod.name, &mod_path.display(), e);
+                }
+            }
         });
     }
 
@@ -412,10 +444,8 @@ impl SDMMApp {
                 if (*file.name()).ends_with('/') {
                     create_dir_all(&outpath).unwrap();
                 } else {
-                    if let Some(p) = outpath.parent() {
-                        if !p.exists() {
-                            create_dir_all(&p).unwrap();
-                        }
+                    if let Some(p) = outpath.parent() && !p.exists() {
+                        create_dir_all(&p).unwrap();
                     }
                     let mut outfile = File::create(&outpath).unwrap();
                     io::copy(&mut file, &mut outfile).unwrap();
@@ -548,6 +578,7 @@ impl eframe::App for SDMMApp {
                 ui.selectable_value(&mut self.state, Menus::Browse, "Browse");
                 ui.selectable_value(&mut self.state, Menus::Downloading, "Downloading");
                 ui.selectable_value(&mut self.state, Menus::Mods, "Mods");
+                
             });
         });
         if self.needs_key {

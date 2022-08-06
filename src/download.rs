@@ -1,14 +1,13 @@
-
+use core::panic;
+use futures_util::StreamExt;
 use interprocess::local_socket::LocalSocketListener;
 use serde::{Deserialize, Serialize};
-use core::panic;
-use std::fs::{File};
-use std::io::{Write, Read};
+use std::fs::File;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TrySendError::Disconnected;
-use std::sync::mpsc::{SyncSender};
 use std::thread;
-use futures_util::StreamExt;
 
 pub const BASE_URI: &str = "api.nexusmods.com/v1/games/";
 
@@ -23,7 +22,12 @@ struct DownloadLink {
     uri: String,
 }
 
-pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, usize, usize)>, download_path: PathBuf, api_key: String, last_download: String) {
+pub fn handle_download_requests(
+    sync_sender: SyncSender<(String, usize, usize, usize, usize)>,
+    download_path: PathBuf,
+    api_key: String,
+    last_download: String,
+) {
     let base_path = Path::new(BASE_URI);
     let listener = LocalSocketListener::bind("/tmp/sdmm.sock").unwrap();
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -45,11 +49,13 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
                 let client = reqwest::Client::new();
                 // Make a request to get the Download URL
                 let (mod_id, file_id) = get_ids(&last_download);
-                let response = client.get(get_download_url(base_path, &last_download))
-                // This needs to be less static and with a proper API key from Nexus for
-                // the application
-                .header("apikey", api_key)
-                .send().await;
+                let response = client
+                    .get(get_download_url(base_path, &last_download))
+                    // This needs to be less static and with a proper API key from Nexus for
+                    // the application
+                    .header("apikey", api_key)
+                    .send()
+                    .await;
                 match response {
                     Ok(resp) => {
                         let response_body = resp.json::<Links>().await;
@@ -57,12 +63,19 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
                             Ok(links) => {
                                 let download = links.0.first().unwrap();
                                 println!("Beginning Download from {:?}", download.uri);
-                                download_file(&client, sync_sender, download, &download_path, mod_id, file_id).await;
+                                download_file(
+                                    &client,
+                                    sync_sender,
+                                    download,
+                                    &download_path,
+                                    mod_id,
+                                    file_id,
+                                )
+                                .await;
                                 println!("Finished Download of {}", get_filename(&download.uri));
                             }
                             Err(e) => eprintln!("Error Occured: {}", e),
                         }
-                        
                     }
                     Err(e) => {
                         eprintln!("Error Occured: {}", e);
@@ -88,11 +101,13 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
                 string = string.replace('\0', "");
                 // Make a request to get the Download URL
                 let (mod_id, file_id) = get_ids(&string);
-                let response = client.get(get_download_url(base_path, &string))
-                // This needs to be less static and with a proper API key from Nexus for
-                // the application
-                .header("apikey", api_key)
-                .send().await;
+                let response = client
+                    .get(get_download_url(base_path, &string))
+                    // This needs to be less static and with a proper API key from Nexus for
+                    // the application
+                    .header("apikey", api_key)
+                    .send()
+                    .await;
                 match response {
                     Ok(resp) => {
                         let response_body = resp.json::<Links>().await;
@@ -100,12 +115,19 @@ pub fn handle_download_requests(sync_sender: SyncSender<(String, usize, usize, u
                             Ok(links) => {
                                 let download = links.0.first().unwrap();
                                 println!("Beginning Download from {:?}", download.uri);
-                                download_file(&client, sync_sender, download, &download_path, mod_id, file_id).await;
+                                download_file(
+                                    &client,
+                                    sync_sender,
+                                    download,
+                                    &download_path,
+                                    mod_id,
+                                    file_id,
+                                )
+                                .await;
                                 println!("Finished Download of {}", get_filename(&download.uri));
                             }
                             Err(e) => eprintln!("Error Occured: {}", e),
                         }
-                        
                     }
                     Err(e) => {
                         eprintln!("Error Occured: {}", e);
@@ -130,27 +152,35 @@ async fn download_file(
     let sync_sender = sync_sender.clone();
     let res = client.get(&download_clone.uri).send().await;
     if let Ok(resp) = res {
-        let total_size =
-            if let Some(size) = resp.content_length() {
-                size as usize
-            } else {
-                eprintln!(
-                    "Failed to download from {}",
-                    &download_clone.uri
-                );
-                0
-            };
+        let total_size = if let Some(size) = resp.content_length() {
+            size as usize
+        } else {
+            eprintln!("Failed to download from {}", &download_clone.uri);
+            0
+        };
         if total_size == 0 {
             eprintln!("File size is 0");
             return;
         }
         let file_name = get_filename(&download_clone.uri);
-        if let Ok(mut file) =
-            File::create(download_path.join(&file_name))
-        {
+        if let Ok(mut file) = File::create(download_path.join(&file_name)) {
             let mut downloaded: usize = 0;
-            match sync_sender.try_send((file_name.to_string(), downloaded, total_size, mod_id, file_id)) {
-                Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size, mod_id, file_id)) => {
+            match sync_sender.try_send((
+                file_name.to_string(),
+                downloaded,
+                total_size,
+                mod_id,
+                file_id,
+            )) {
+                Err(e)
+                    if e == Disconnected((
+                        file_name.to_string(),
+                        downloaded,
+                        total_size,
+                        mod_id,
+                        file_id,
+                    )) =>
+                {
                     panic!("Error Occured when sending: {}", e);
                 }
                 _ => {}
@@ -161,33 +191,56 @@ async fn download_file(
                     let written = file.write(&chunk).unwrap();
                     assert_eq!(written, chunk.len());
                     downloaded += chunk.len();
-                    match sync_sender.try_send((file_name.to_string(), downloaded, total_size, mod_id, file_id)) {
-                        Err(e) if e == Disconnected((file_name.to_string(), downloaded, total_size, mod_id, file_id)) => {
+                    match sync_sender.try_send((
+                        file_name.to_string(),
+                        downloaded,
+                        total_size,
+                        mod_id,
+                        file_id,
+                    )) {
+                        Err(e)
+                            if e == Disconnected((
+                                file_name.to_string(),
+                                downloaded,
+                                total_size,
+                                mod_id,
+                                file_id,
+                            )) =>
+                        {
                             panic!("Error Occured when sending: {}", e);
                         }
                         _ => {}
                     }
                 } else {
-                    eprintln!("Failed to create file at {}", download_path.join(file_name).display());
+                    eprintln!(
+                        "Failed to create file at {}",
+                        download_path.join(file_name).display()
+                    );
                     return;
                 }
             }
-            sync_sender.send((file_name.to_string(), downloaded, total_size, mod_id, file_id)).unwrap();
+            sync_sender
+                .send((
+                    file_name.to_string(),
+                    downloaded,
+                    total_size,
+                    mod_id,
+                    file_id,
+                ))
+                .unwrap();
         } else {
-            eprintln!("Failed to create file at {}", download_path.join(file_name).display());
+            eprintln!(
+                "Failed to create file at {}",
+                download_path.join(file_name).display()
+            );
         }
     } else {
-        eprintln!(
-            "Failed to download from {}",
-            &download_clone.uri
-        );
+        eprintln!("Failed to download from {}", &download_clone.uri);
     }
 }
 
 fn get_filename(uri: &str) -> String {
-    let split_uri = uri
-        .split('/')
-        .collect::<Vec<&str>>();
+    let split_uri = uri.split('/').collect::<Vec<&str>>();
     let file_name = if split_uri[2].contains("nexus-cdn") {
         split_uri[5]
     } else {
@@ -275,5 +328,5 @@ pub struct ModFileDetails {
     pub size_kb: Option<u64>,
     pub size_in_bytes: Option<u64>,
     pub changelog_html: Option<String>,
-    pub content_preview_link: Option<String>
+    pub content_preview_link: Option<String>,
 }

@@ -5,12 +5,14 @@ use eframe::{egui, CreationContext, Storage};
 use egui_extras::{Size, TableBuilder};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{hash_map::Entry, HashMap};
 use std::fs::{create_dir, create_dir_all, read_dir, remove_dir_all, remove_file, File};
-use std::io::{self, Write, Read};
-use std::path::{PathBuf, Path};
-use std::process::{Command, Stdio};
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver};
+
+#[cfg(target_os = "linux")]
+use std::process::{Command, Stdio};
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct DepGameMod {
@@ -20,7 +22,7 @@ struct DepGameMod {
     version: String,
     author: String,
     link: String,
-    id: u64
+    id: u64,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -32,7 +34,7 @@ struct GameMod {
     author: String,
     link: String,
     mod_id: u64,
-    file_id: u64
+    file_id: u64,
 }
 
 #[derive(Default, PartialEq)]
@@ -147,19 +149,68 @@ impl SDMMApp {
                             .show(ui, |ui| {
                                 TableBuilder::new(ui)
                                     .cell_layout(
-                                        egui::Layout::left_to_right().with_cross_align(egui::Align::Center),
+                                        egui::Layout::left_to_right()
+                                            .with_cross_align(egui::Align::Center),
                                     )
                                     .resizable(true)
                                     .columns(Size::remainder().at_least(5.), 3)
                                     .header(20.0, |mut header| {
                                         header.col(|ui| {
                                             ui.heading("Name");
+                                            let resp = ui.interact(
+                                                ui.max_rect(),
+                                                egui::Id::new("name-header-inactive"),
+                                                egui::Sense::click(),
+                                            );
+                                            if resp.clicked() {
+                                                if let Some(res) = self.inactive.get(0) {
+                                                    if let Some(first) =
+                                                        res.name.to_lowercase().chars().next()
+                                                    {
+                                                        if first as u8 > b'a' {
+                                                            self.inactive.sort_by(|a, b| {
+                                                                a.name.partial_cmp(&b.name).unwrap()
+                                                            });
+                                                        } else {
+                                                            self.inactive.sort_by(|a, b| {
+                                                                b.name.partial_cmp(&a.name).unwrap()
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         });
                                         header.col(|ui| {
                                             ui.heading("Version");
                                         });
                                         header.col(|ui| {
                                             ui.heading("Author");
+                                            let resp = ui.interact(
+                                                ui.max_rect(),
+                                                egui::Id::new("author-header-inactive"),
+                                                egui::Sense::click(),
+                                            );
+                                            if resp.clicked() {
+                                                if let Some(res) = self.inactive.get(0) {
+                                                    if let Some(first) =
+                                                        res.author.to_lowercase().chars().next()
+                                                    {
+                                                        if first as u8 > b'a' {
+                                                            self.inactive.sort_by(|a, b| {
+                                                                a.author
+                                                                    .partial_cmp(&b.author)
+                                                                    .unwrap()
+                                                            });
+                                                        } else {
+                                                            self.inactive.sort_by(|a, b| {
+                                                                b.author
+                                                                    .partial_cmp(&a.author)
+                                                                    .unwrap()
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         });
                                     })
                                     .body(|mut body| {
@@ -184,7 +235,9 @@ impl SDMMApp {
                                                             r#mod, index, false,
                                                         );
                                                     }
-                                                    self.show_context_menu(sense, r#mod, index, false);
+                                                    self.show_context_menu(
+                                                        sense, r#mod, index, false,
+                                                    );
                                                 });
                                                 row.col(|ui| {
                                                     ui.label(&r#mod.version);
@@ -203,7 +256,9 @@ impl SDMMApp {
                                                             r#mod, index, false,
                                                         );
                                                     }
-                                                    self.show_context_menu(sense, r#mod, index, false);
+                                                    self.show_context_menu(
+                                                        sense, r#mod, index, false,
+                                                    );
                                                 });
                                                 row.col(|ui| {
                                                     ui.label(&r#mod.author);
@@ -222,7 +277,9 @@ impl SDMMApp {
                                                             r#mod, index, false,
                                                         );
                                                     }
-                                                    self.show_context_menu(sense, r#mod, index, false);
+                                                    self.show_context_menu(
+                                                        sense, r#mod, index, false,
+                                                    );
                                                 });
                                             });
                                         }
@@ -238,19 +295,68 @@ impl SDMMApp {
                             .show(ui, |ui| {
                                 TableBuilder::new(ui)
                                     .cell_layout(
-                                        egui::Layout::left_to_right().with_cross_align(egui::Align::Center),
+                                        egui::Layout::left_to_right()
+                                            .with_cross_align(egui::Align::Center),
                                     )
                                     .resizable(true)
                                     .columns(Size::remainder().at_least(5.), 3)
                                     .header(20.0, |mut header| {
                                         header.col(|ui| {
                                             ui.heading("Name");
+                                            let resp = ui.interact(
+                                                ui.max_rect(),
+                                                egui::Id::new("name-header-active"),
+                                                egui::Sense::click(),
+                                            );
+                                            if resp.clicked() {
+                                                if let Some(res) = self.active.get(0) {
+                                                    if let Some(first) =
+                                                        res.name.to_lowercase().chars().next()
+                                                    {
+                                                        if first as u8 > b'a' {
+                                                            self.active.sort_by(|a, b| {
+                                                                a.name.partial_cmp(&b.name).unwrap()
+                                                            });
+                                                        } else {
+                                                            self.active.sort_by(|a, b| {
+                                                                b.name.partial_cmp(&a.name).unwrap()
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         });
                                         header.col(|ui| {
                                             ui.heading("Version");
                                         });
                                         header.col(|ui| {
                                             ui.heading("Author");
+                                            let resp = ui.interact(
+                                                ui.max_rect(),
+                                                egui::Id::new("author-header-active"),
+                                                egui::Sense::click(),
+                                            );
+                                            if resp.clicked() {
+                                                if let Some(res) = self.active.get(0) {
+                                                    if let Some(first) =
+                                                        res.author.to_lowercase().chars().next()
+                                                    {
+                                                        if first as u8 > b'a' {
+                                                            self.active.sort_by(|a, b| {
+                                                                a.author
+                                                                    .partial_cmp(&b.author)
+                                                                    .unwrap()
+                                                            });
+                                                        } else {
+                                                            self.active.sort_by(|a, b| {
+                                                                b.author
+                                                                    .partial_cmp(&a.author)
+                                                                    .unwrap()
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         });
                                     })
                                     .body(|mut body| {
@@ -275,7 +381,9 @@ impl SDMMApp {
                                                             r#mod, index, true,
                                                         );
                                                     }
-                                                    self.show_context_menu(sense, r#mod, index, true);
+                                                    self.show_context_menu(
+                                                        sense, r#mod, index, true,
+                                                    );
                                                 });
                                                 row.col(|ui| {
                                                     ui.label(&r#mod.version);
@@ -294,7 +402,9 @@ impl SDMMApp {
                                                             r#mod, index, true,
                                                         );
                                                     }
-                                                    self.show_context_menu(sense, r#mod, index, true);
+                                                    self.show_context_menu(
+                                                        sense, r#mod, index, true,
+                                                    );
                                                 });
                                                 row.col(|ui| {
                                                     ui.label(&r#mod.author);
@@ -313,7 +423,9 @@ impl SDMMApp {
                                                             r#mod, index, true,
                                                         );
                                                     }
-                                                    self.show_context_menu(sense, r#mod, index, true);
+                                                    self.show_context_menu(
+                                                        sense, r#mod, index, true,
+                                                    );
                                                 });
                                             });
                                         }
@@ -325,13 +437,15 @@ impl SDMMApp {
         });
     }
 
-    fn show_context_menu(&mut self, sense: egui::Response, r#mod: &mut GameMod, index: usize, is_active: bool) {
+    fn show_context_menu(
+        &mut self,
+        sense: egui::Response,
+        r#mod: &mut GameMod,
+        index: usize,
+        is_active: bool,
+    ) {
         sense.context_menu(|ui| {
-            let text = if is_active {
-                "Disable"
-            } else {
-                "Enable"
-            };
+            let text = if is_active { "Disable" } else { "Enable" };
             if ui.button(text).clicked() {
                 self.switch_active_inactive(r#mod, index, is_active);
             }
@@ -347,7 +461,12 @@ impl SDMMApp {
                 }
                 let mod_path = self.download_path.join(&r#mod.zip_name);
                 if let Err(e) = remove_file(&mod_path) {
-                    eprintln!("Failed to delete mod {} at {}: {}", r#mod.name, &mod_path.display(), e);
+                    eprintln!(
+                        "Failed to delete mod {} at {}: {}",
+                        r#mod.name,
+                        &mod_path.display(),
+                        e
+                    );
                 }
             }
         });
@@ -403,7 +522,9 @@ impl SDMMApp {
             } else {
                 #[cfg(target_os = "windows")]
                 {
-                    let smapi_path = self.game_path.clone()
+                    let smapi_path = self
+                        .game_path
+                        .clone()
                         .join(&r#mod.folder_name)
                         .join("internal\\windows");
                     let file = File::open(smapi_path.join("install.dat")).unwrap();
@@ -412,19 +533,27 @@ impl SDMMApp {
                         if !file.starts_with("Mods") {
                             if is_dir {
                                 match remove_dir_all(self.game_path.join(&file)) {
-                                    Ok(_) => {},
+                                    Ok(_) => {}
                                     Err(e) => {
                                         if e.kind() != io::ErrorKind::NotFound {
-                                            eprintln!("Failed to remove directory {} at {}: {e}", file, self.game_path.join(&file).display())
+                                            eprintln!(
+                                                "Failed to remove directory {} at {}: {e}",
+                                                file,
+                                                self.game_path.join(&file).display()
+                                            )
                                         }
-                                    },
+                                    }
                                 }
                             } else {
                                 match remove_file(self.game_path.join(&file)) {
-                                    Ok(_) => {},
+                                    Ok(_) => {}
                                     Err(e) => {
                                         if e.kind() != io::ErrorKind::NotFound {
-                                            eprintln!("Failed to remove file {} at {}: {e}", file, self.game_path.join(&file).display());
+                                            eprintln!(
+                                                "Failed to remove file {} at {}: {e}",
+                                                file,
+                                                self.game_path.join(&file).display()
+                                            );
                                         }
                                     }
                                 }
@@ -432,17 +561,19 @@ impl SDMMApp {
                         }
                     }
                     match remove_file(self.game_path.join("StardewModdingAPI.deps.json")) {
-                        Ok(_) => {},
+                        Ok(_) => {}
                         Err(e) => {
                             if e.kind() != io::ErrorKind::NotFound {
                                 eprintln!("Failed to remove file: {e}")
                             }
-                        },
+                        }
                     }
                 }
                 #[cfg(target_os = "linux")]
                 {
-                    let executable = self.game_path.clone()
+                    let executable = self
+                        .game_path
+                        .clone()
                         .join(&r#mod.folder_name)
                         .join("internal/linux/SMAPI.Installer")
                         .display()
@@ -482,14 +613,14 @@ impl SDMMApp {
             if r#mod.mod_id == 2400 {
                 #[cfg(target_os = "windows")]
                 {
-                    let smapi_path = mods_path
-                        .join(&r#mod.folder_name)
-                        .join("internal\\windows");
+                    let smapi_path = mods_path.join(&r#mod.folder_name).join("internal\\windows");
                     let file = File::open(smapi_path.join("install.dat")).unwrap();
                     unzip(&file, &mods_path);
                     let file = File::open(self.game_path.join("Stardew Valley.deps.json")).unwrap();
-                    let mut dup = File::create(self.game_path.join("StardewModdingAPI.deps.json")).unwrap();
-                    dup.write_all(&(file.bytes().map(|b| b.ok().unwrap()).collect::<Vec<u8>>())).unwrap();
+                    let mut dup =
+                        File::create(self.game_path.join("StardewModdingAPI.deps.json")).unwrap();
+                    dup.write_all(&(file.bytes().map(|b| b.ok().unwrap()).collect::<Vec<u8>>()))
+                        .unwrap();
                 }
                 #[cfg(target_os = "linux")]
                 {
@@ -550,17 +681,17 @@ impl eframe::App for SDMMApp {
                         } else {
                             ModDetails::default()
                         }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("Error getting mod details: {e}");
                         continue;
-                    },
+                    }
                 };
                 let resp = self
                     .web_client
                     .get(format!(
                         "https://{}/stardewvalley/mods/{mod_id}/files/{file_id}.json",
-                        base_path.display(), 
+                        base_path.display(),
                     ))
                     .header("apikey", self.api_key.clone())
                     .send();
@@ -570,13 +701,27 @@ impl eframe::App for SDMMApp {
                             if self
                                 .inactive
                                 .iter()
-                                .filter(|m| m.mod_id == *mod_id as u64 && m.version == json.version.clone().unwrap_or_else(|| String::from("0")))
+                                .filter(|m| {
+                                    m.mod_id == *mod_id as u64
+                                        && m.version
+                                            == json
+                                                .version
+                                                .clone()
+                                                .unwrap_or_else(|| String::from("0"))
+                                })
                                 .count()
                                 > 0
                                 || self
                                     .active
                                     .iter()
-                                    .filter(|m| m.mod_id == *mod_id as u64 && m.version == json.version.clone().unwrap_or_else(|| String::from("0")))
+                                    .filter(|m| {
+                                        m.mod_id == *mod_id as u64
+                                            && m.version
+                                                == json
+                                                    .version
+                                                    .clone()
+                                                    .unwrap_or_else(|| String::from("0"))
+                                    })
                                     .count()
                                     > 0
                             {
@@ -588,7 +733,9 @@ impl eframe::App for SDMMApp {
                                 folder_name: "".into(),
                                 version: json.version.unwrap(),
                                 author: mod_details.author,
-                                link: format!("https://www.nexusmods.com/stardewvalley/mods/{mod_id}"),
+                                link: format!(
+                                    "https://www.nexusmods.com/stardewvalley/mods/{mod_id}"
+                                ),
                                 mod_id: *mod_id as u64,
                                 file_id: *file_id as u64,
                             });
@@ -612,7 +759,6 @@ impl eframe::App for SDMMApp {
                 ui.selectable_value(&mut self.state, Menus::Browse, "Browse");
                 ui.selectable_value(&mut self.state, Menus::Downloading, "Downloading");
                 ui.selectable_value(&mut self.state, Menus::Mods, "Mods");
-                
             });
         });
         if self.needs_key {
@@ -632,6 +778,7 @@ impl eframe::App for SDMMApp {
             Menus::Mods => self.mods_display(ctx),
             Menus::Settings => {}
         }
+        egui::TopBottomPanel::bottom("footer").show(ctx, |ui| {});
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -646,7 +793,7 @@ impl eframe::App for SDMMApp {
 
 fn load_from_storage(
     storage: &dyn Storage,
-    web_client: &Client
+    web_client: &Client,
 ) -> (Vec<GameMod>, Vec<GameMod>, PathBuf, String, String) {
     let base_path = PathBuf::from(crate::download::BASE_URI);
 
@@ -678,8 +825,8 @@ fn load_from_storage(
     }
 
     #[derive(Deserialize, Serialize)]
-    struct ModFileDetailsVec{
-        pub files: Vec<ModFileDetails>
+    struct ModFileDetailsVec {
+        pub files: Vec<ModFileDetails>,
     }
 
     // TODO: Make a request to check the status of the mods, check for different/newer version
@@ -702,7 +849,9 @@ fn load_from_storage(
                 Ok(res) => match res.json::<ModFileDetailsVec>() {
                     Ok(details) => {
                         for dets in details.files {
-                            if dets.file_name.unwrap() == old.zip_name && dets.version.unwrap() == old.version {
+                            if dets.file_name.unwrap() == old.zip_name
+                                && dets.version.unwrap() == old.version
+                            {
                                 active_mods.push(GameMod {
                                     name: old.name.clone(),
                                     zip_name: old.zip_name.clone(),
@@ -716,14 +865,14 @@ fn load_from_storage(
                                 continue 'main;
                             }
                         }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("Failed to serialize Vec<ModFileDetails>: {e}");
-                    },
-                }, 
+                    }
+                },
                 Err(e) => {
                     eprintln!("Failed to get files: {e}");
-                },
+                }
             }
             active_mods.push(GameMod {
                 name: old.name,
@@ -752,11 +901,12 @@ fn load_from_storage(
                 .send();
 
             match resp {
-                Ok(res) => 
-                match res.json::<ModFileDetailsVec>() {
+                Ok(res) => match res.json::<ModFileDetailsVec>() {
                     Ok(details) => {
                         for dets in details.files {
-                            if dets.file_name.unwrap() == old.zip_name && dets.version.unwrap() == old.version {
+                            if dets.file_name.unwrap() == old.zip_name
+                                && dets.version.unwrap() == old.version
+                            {
                                 inactive_mods.push(GameMod {
                                     name: old.name.clone(),
                                     zip_name: old.zip_name.clone(),
@@ -770,14 +920,14 @@ fn load_from_storage(
                                 continue 'main;
                             }
                         }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("Failed to serialize Vec<ModFileDetails>: {e}")
-                    },
-                }, 
+                    }
+                },
                 Err(e) => {
                     eprintln!("Failed to get files: {e}")
-                },
+                }
             }
             inactive_mods.push(GameMod {
                 name: old.name,

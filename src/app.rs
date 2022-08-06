@@ -7,8 +7,8 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, hash_map::Entry};
 use std::fs::{create_dir, create_dir_all, read_dir, remove_dir_all, remove_file, File};
-use std::io::{self, BufWriter, Write};
-use std::path::PathBuf;
+use std::io::{self, Write, Read};
+use std::path::{PathBuf, Path};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{sync_channel, Receiver};
 
@@ -401,6 +401,67 @@ impl SDMMApp {
             let mods_path = if r#mod.mod_id != 2400 {
                 self.game_path.join("mods")
             } else {
+                #[cfg(target_os = "windows")]
+                {
+                    let smapi_path = self.game_path.clone()
+                        .join(&r#mod.folder_name)
+                        .join("internal\\windows");
+                    let file = File::open(smapi_path.join("install.dat")).unwrap();
+                    let files = list_files(&file);
+                    for (file, is_dir) in files {
+                        if !file.starts_with("Mods") {
+                            if is_dir {
+                                match remove_dir_all(self.game_path.join(&file)) {
+                                    Ok(_) => {},
+                                    Err(e) => {
+                                        if e.kind() != io::ErrorKind::NotFound {
+                                            eprintln!("Failed to remove directory {} at {}: {e}", file, self.game_path.join(&file).display())
+                                        }
+                                    },
+                                }
+                            } else {
+                                match remove_file(self.game_path.join(&file)) {
+                                    Ok(_) => {},
+                                    Err(e) => {
+                                        if e.kind() != io::ErrorKind::NotFound {
+                                            eprintln!("Failed to remove file {} at {}: {e}", file, self.game_path.join(&file).display());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    match remove_file(self.game_path.join("StardewModdingAPI.deps.json")) {
+                        Ok(_) => {},
+                        Err(e) => {
+                            if e.kind() != io::ErrorKind::NotFound {
+                                eprintln!("Failed to remove file: {e}")
+                            }
+                        },
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    let executable = self.game_path.clone()
+                        .join(&r#mod.folder_name)
+                        .join("internal/linux/SMAPI.Installer")
+                        .display()
+                        .to_string();
+                    let mut installer = Command::new(executable)
+                        .stdin(Stdio::piped())
+                        .spawn()
+                        .unwrap();
+                    let stdin = installer.stdin.as_mut().unwrap();
+                    stdin.write(b"\n").unwrap();
+                    stdin.write(b"2\n").unwrap();
+                    stdin
+                        .write_all(self.game_path.display().to_string().as_bytes())
+                        .unwrap();
+                    stdin.write(b"\n").unwrap();
+                    stdin.write(b"2\n").unwrap();
+                    stdin.write(b"\n").unwrap();
+                    let _ = installer.wait();
+                }
                 self.game_path.clone()
             };
             let mod_path = mods_path.join(&r#mod.folder_name);
@@ -416,68 +477,41 @@ impl SDMMApp {
                 self.game_path.clone()
             };
             let file = File::open(self.download_path.join(&r#mod.zip_name)).unwrap();
-            let mut archive = zip::ZipArchive::new(file).unwrap();
-            // Get the folder name for the mod
-            {
-                let first = archive.by_index(0).unwrap();
-                if first.is_dir() {
-                    r#mod.folder_name = first.enclosed_name().unwrap().display().to_string();
-                } else {
-                    r#mod.folder_name = first
-                        .enclosed_name()
-                        .unwrap()
-                        .parent()
-                        .unwrap()
-                        .display()
-                        .to_string();
-                }
-            }
-            // FIXME: Take this off thread
-            for i in 0..archive.len() {
-                let mut file = archive.by_index(i).unwrap();
-                let outpath = match file.enclosed_name() {
-                    Some(path) => path.to_owned(),
-                    None => continue,
-                };
-                let outpath = mods_path.join(outpath);
-
-                if (*file.name()).ends_with('/') {
-                    create_dir_all(&outpath).unwrap();
-                } else {
-                    if let Some(p) = outpath.parent() && !p.exists() {
-                        create_dir_all(&p).unwrap();
-                    }
-                    let mut outfile = File::create(&outpath).unwrap();
-                    io::copy(&mut file, &mut outfile).unwrap();
-                }
-            }
+            r#mod.folder_name = unzip(&file, &mods_path);
             // TODO: Handle installing smapi and updating
             if r#mod.mod_id == 2400 {
                 #[cfg(target_os = "windows")]
-                let executable = mods_path
-                    .join(&r#mod.folder_name)
-                    .join("internal\\windows\\SMAPI.Installer.exe")
-                    .display()
-                    .to_string();
+                {
+                    let smapi_path = mods_path
+                        .join(&r#mod.folder_name)
+                        .join("internal\\windows");
+                    let file = File::open(smapi_path.join("install.dat")).unwrap();
+                    unzip(&file, &mods_path);
+                    let file = File::open(self.game_path.join("Stardew Valley.deps.json")).unwrap();
+                    let mut dup = File::create(self.game_path.join("StardewModdingAPI.deps.json")).unwrap();
+                    dup.write_all(&(file.bytes().map(|b| b.ok().unwrap()).collect::<Vec<u8>>())).unwrap();
+                }
                 #[cfg(target_os = "linux")]
-                let executable = mods_path
-                    .join(&r#mod.folder_name)
-                    .join("internal/linux/SMAPI.Installer")
-                    .display()
-                    .to_string();
-                let installer = Command::new(executable)
-                    .stdin(Stdio::piped())
-                    .spawn()
-                    .unwrap();
-                let mut stdin = installer.stdin.unwrap();
-                let mut writer = BufWriter::new(&mut stdin);
-                writer.write_all(b"2\n").unwrap();
-                writer
-                    .write_all(self.game_path.display().to_string().as_bytes())
-                    .unwrap();
-                writer.write_all(b"\n").unwrap();
-                writer.write_all(b"1\n").unwrap();
-                writer.write_all(b"\n").unwrap();
+                {
+                    let executable = mods_path
+                        .join(&r#mod.folder_name)
+                        .join("internal/linux/SMAPI.Installer")
+                        .display()
+                        .to_string();
+                    let mut installer = Command::new(executable)
+                        .stdin(Stdio::piped())
+                        .spawn()
+                        .unwrap();
+                    let stdin = installer.stdin.as_mut().unwrap();
+                    stdin.write(b"\n").unwrap();
+                    stdin.write(b"2\n").unwrap();
+                    stdin
+                        .write_all(self.game_path.display().to_string().as_bytes())
+                        .unwrap();
+                    stdin.write(b"\n").unwrap();
+                    stdin.write(b"1\n").unwrap();
+                    stdin.write(b"\n").unwrap();
+                }
             }
             self.active.push(r#mod.clone());
             self.inactive.remove(index);
@@ -792,4 +826,53 @@ fn setup_download_path(context: &CreationContext<'_>) -> PathBuf {
         return dir.join("mods");
     }
     panic!("Could not get or create the download path");
+}
+
+fn unzip(file: &File, output_location: &Path) -> String {
+    let folder_name: String;
+    let mut archive = zip::ZipArchive::new(file).unwrap();
+    // Get the folder name for the mod
+    {
+        let first = archive.by_index(0).unwrap();
+        if first.is_dir() {
+            folder_name = first.enclosed_name().unwrap().display().to_string();
+        } else {
+            folder_name = first
+                .enclosed_name()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .display()
+                .to_string();
+        }
+    }
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).unwrap();
+        let outpath = match file.enclosed_name() {
+            Some(path) => path.to_owned(),
+            None => continue,
+        };
+        let outpath = output_location.join(outpath);
+
+        if (*file.name()).ends_with('/') {
+            create_dir_all(&outpath).unwrap();
+        } else {
+            if let Some(p) = outpath.parent() && !p.exists() {
+                create_dir_all(&p).unwrap();
+            }
+            let mut outfile = File::create(&outpath).unwrap();
+            io::copy(&mut file, &mut outfile).unwrap();
+        }
+    }
+    folder_name
+}
+
+fn list_files(file: &File) -> Vec<(String, bool)> {
+    let mut files: Vec<(String, bool)> = vec![];
+    let mut archive = zip::ZipArchive::new(file).unwrap();
+    for i in 0..archive.len() {
+        let file = archive.by_index(i).unwrap();
+        files.push((file.name().to_string(), file.is_dir()));
+    }
+    files
 }

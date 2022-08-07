@@ -602,6 +602,9 @@ impl SDMMApp {
             self.inactive.push(r#mod.clone());
             self.active.remove(index);
         } else {
+            if self.active.into_iter().find(|m| m.mod_id == r#mod.mod_id).is_some() {
+                return;
+            }
             let mods_path = if r#mod.mod_id != 2400 {
                 self.game_path.join("mods")
             } else {

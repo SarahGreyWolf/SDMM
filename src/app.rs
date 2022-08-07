@@ -435,6 +435,9 @@ impl SDMMApp {
                 }
             });
         });
+        egui::TopBottomPanel::bottom("footer").show(ctx, |ui| {
+            ui.label("Double click a mod to activate or deactivate it, you can right click a mod to delete it.");
+        });
     }
 
     fn show_context_menu(
@@ -781,7 +784,6 @@ impl eframe::App for SDMMApp {
             Menus::Mods => self.mods_display(ctx),
             Menus::Settings => {}
         }
-        egui::TopBottomPanel::bottom("footer").show(ctx, |ui| {});
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

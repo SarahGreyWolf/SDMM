@@ -14,6 +14,8 @@ use std::sync::mpsc::{sync_channel, Receiver};
 #[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
 
+const HIGH: u64 = u64::MAX - 10000;
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct DepGameMod {
     name: String,
@@ -25,7 +27,7 @@ struct DepGameMod {
     id: u64,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 struct GameMod {
     name: String,
     zip_name: String,
@@ -35,6 +37,21 @@ struct GameMod {
     link: String,
     mod_id: u64,
     file_id: u64,
+}
+
+impl Default for GameMod {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            zip_name: Default::default(),
+            folder_name: Default::default(),
+            version: "0.0.0".into(),
+            author: "Unknown".into(),
+            link: Default::default(),
+            mod_id: Default::default(),
+            file_id: Default::default()
+        }
+    }
 }
 
 #[derive(Default, PartialEq)]
@@ -219,7 +236,11 @@ impl SDMMApp {
                                         {
                                             body.row(20., |mut row| {
                                                 row.col(|ui| {
-                                                    ui.hyperlink_to(&r#mod.name, &r#mod.link);
+                                                    if !r#mod.link.is_empty() {
+                                                        ui.hyperlink_to(&r#mod.name, &r#mod.link);
+                                                    } else {
+                                                        ui.label(&r#mod.name);
+                                                    }
                                                     let sense = ui.interact(
                                                         ui.max_rect(),
                                                         egui::Id::new(&format!(
@@ -370,7 +391,11 @@ impl SDMMApp {
                                         {
                                             body.row(20., |mut row| {
                                                 row.col(|ui| {
-                                                    ui.hyperlink_to(&r#mod.name, &r#mod.link);
+                                                    if !r#mod.link.is_empty() {
+                                                        ui.hyperlink_to(&r#mod.name, &r#mod.link);
+                                                    } else {
+                                                        ui.label(&r#mod.name);
+                                                    }
                                                     let sense = ui.interact(
                                                         ui.max_rect(),
                                                         egui::Id::new(&format!(
@@ -616,6 +641,7 @@ impl SDMMApp {
             self.active.remove(index);
         } else {
             if self.active.iter().any(|m| m.mod_id == r#mod.mod_id) {
+                println!("Already exists? {}", r#mod.mod_id);
                 return;
             }
             let mods_path = if r#mod.mod_id != 2400 {
@@ -674,10 +700,52 @@ impl SDMMApp {
             }
         });
     }
+
+    fn handle_drag_drop(&mut self, ctx: &egui::Context) {
+        let files = &ctx.input().raw.dropped_files;
+        for f in files {
+            let file_path = f.path.clone().unwrap();
+            let file_name = file_path.iter().last().unwrap().to_str().unwrap().to_string();
+            if let Ok(mut ff) = File::open(&f.path.clone().unwrap()) {
+                match File::create(self.download_path.join(&file_name)) {
+                    Ok(ref mut file) => {
+                        let mut bytes = vec![];
+                        ff.read_to_end(&mut bytes).expect(&format!("Failed to read bytes from {}", file_path.display()));
+                        if let Err(e) = file.write_all(&bytes) {
+                            eprintln!("Failed to write bytes to file {} at {}: {e}", file_name, self.download_path.display())
+                        } else {
+                            let mut id = HIGH;
+                            self.inactive.iter().for_each(|m| {
+                                if m.mod_id >= HIGH && m.mod_id <= id{
+                                    id += 1;
+                                }
+                            });
+                            self.active.iter().for_each(|m| {
+                                if m.mod_id >= HIGH && m.mod_id <= id{
+                                    id += 1;
+                                }
+                            });
+                            self.inactive.push(GameMod {
+                                name: file_name.clone(),
+                                zip_name: file_name.clone(),
+                                mod_id: id,
+                                file_id: id,
+                                ..Default::default()
+                            });
+                        }
+                    },
+                    Err(e) => eprintln!("Failed to create file {} at {}: {e}", file_name, self.download_path.display()),
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for SDMMApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if !ctx.input().raw.dropped_files.is_empty() {
+            self.handle_drag_drop(ctx);
+        }
         let base_path = PathBuf::from(crate::download::BASE_URI);
         for (mod_name, downloaded, total, mod_id, file_id) in self.downloads_receiver.try_recv() {
             // if !self.downloads.contains_key(&mod_name) {

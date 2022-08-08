@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(debug_assertions, windows_subsystem = "windows")]
 use interprocess::local_socket::LocalSocketStream;
 use std::env;
 use std::io;
@@ -31,6 +31,7 @@ fn main() {
     let native_options = eframe::NativeOptions {
         initial_window_size: Some(eframe::emath::vec2(800., 600.)),
         resizable: true,
+        drag_and_drop_support: true,
         ..Default::default()
     };
     eframe::run_native(
@@ -48,7 +49,8 @@ fn setup(reset: bool) -> io::Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     if hkcu
         .open_subkey(&format!("SOFTWARE\\Classes\\{}", URI_SCHEME))
-        .is_ok() && !reset
+        .is_ok()
+        && !reset
     {
         return Ok(());
     }

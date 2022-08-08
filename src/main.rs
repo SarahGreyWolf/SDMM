@@ -27,7 +27,7 @@ fn main() {
         }
     }
 
-    setup().unwrap();
+    setup(false).unwrap();
     let native_options = eframe::NativeOptions {
         initial_window_size: Some(eframe::emath::vec2(800., 600.)),
         resizable: true,
@@ -40,7 +40,7 @@ fn main() {
     );
 }
 #[cfg(target_os = "windows")]
-fn setup() -> io::Result<()> {
+fn setup(reset: bool) -> io::Result<()> {
     use winreg::enums::*;
     use winreg::RegKey;
     const FRIENDLY_NAME: &str = "NexusMods";
@@ -48,7 +48,7 @@ fn setup() -> io::Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     if hkcu
         .open_subkey(&format!("SOFTWARE\\Classes\\{}", URI_SCHEME))
-        .is_ok()
+        .is_ok() && !reset
     {
         return Ok(());
     }

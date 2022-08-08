@@ -1,6 +1,6 @@
 [package]
 name = "sdmm"
-description = "Simple and Wweet Stardew Valley Mod Manager"
+description = "Simple and Sweet Stardew Valley Mod Manager"
 version = "0.1.0"
 edition = "2021"
 authors = ["SarahGreyWolf <m.sarahgreywolf@outlook.com>"]

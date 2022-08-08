@@ -283,6 +283,14 @@ impl SDMMApp {
                                                 });
                                             });
                                         }
+                                        body.row(20., |mut row| {
+                                            row.col(|_| {
+                                            });
+                                            row.col(|_| {
+                                            });
+                                            row.col(|_| {
+                                            });
+                                        });
                                     });
                             });
                     });
@@ -429,6 +437,14 @@ impl SDMMApp {
                                                 });
                                             });
                                         }
+                                        body.row(20., |mut row| {
+                                            row.col(|_| {
+                                            });
+                                            row.col(|_| {
+                                            });
+                                            row.col(|_| {
+                                            });
+                                        });
                                     });
                             });
                     });
@@ -654,6 +670,16 @@ impl SDMMApp {
             self.inactive.remove(index);
         }
     }
+
+    fn settings_display(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Settings");
+            ui.separator();
+            if ui.button("Reset protocol location").clicked() {
+                crate::setup(true).unwrap();
+            }
+        });
+    }
 }
 
 impl eframe::App for SDMMApp {
@@ -782,7 +808,7 @@ impl eframe::App for SDMMApp {
             Menus::Browse => self.browse(ctx),
             Menus::Downloading => self.downloads_display(ctx),
             Menus::Mods => self.mods_display(ctx),
-            Menus::Settings => {}
+            Menus::Settings => self.settings_display(ctx)
         }
     }
 

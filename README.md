@@ -12,7 +12,7 @@ Upon opening the application it registers it's current location for the `nxm:` p
 There is a way to update that location in the settings.
 
 # Usage
-<strong>This does not currently support installing mods in other ways aside from the Nexus `Mod Manager Download` Button, but it will be available soon</strong><br>
+<strong>This does not currently support managing mods in other ways aside from the Nexus `Mod Manager Download` Button, but it will be available soon</strong><br>
 Stardew Mod Manager registers with the `nxm:` protocol from NexusMods meaning that you can install a mod easily by pressing the `Mod Manager Download` button.<br>
 This also extends to SMAPI, it is capable of automatically installing and uninstalling it.<br>
 

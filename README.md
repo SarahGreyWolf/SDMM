@@ -18,3 +18,11 @@ This also extends to SMAPI, it is capable of automatically installing and uninst
 
 You can enable and disable mods at will by double clicking on them in the list or right clicking them.<br>
 Mods can also be deleted from the right click context menu.
+
+# Donate
+### Kofi
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N4N31GIAK)
+### Github Sponsors
+<a href="https://github.com/sponsors/SarahGreyWolf" style="text-decoration: none;">
+        <img src="https://img.shields.io/badge/-Sponsor-grey?style=for-the-badge&logo=Github" alt="Sponsor">
+    </a>

@@ -284,12 +284,9 @@ impl SDMMApp {
                                             });
                                         }
                                         body.row(20., |mut row| {
-                                            row.col(|_| {
-                                            });
-                                            row.col(|_| {
-                                            });
-                                            row.col(|_| {
-                                            });
+                                            row.col(|_| {});
+                                            row.col(|_| {});
+                                            row.col(|_| {});
                                         });
                                     });
                             });
@@ -438,12 +435,9 @@ impl SDMMApp {
                                             });
                                         }
                                         body.row(20., |mut row| {
-                                            row.col(|_| {
-                                            });
-                                            row.col(|_| {
-                                            });
-                                            row.col(|_| {
-                                            });
+                                            row.col(|_| {});
+                                            row.col(|_| {});
+                                            row.col(|_| {});
                                         });
                                     });
                             });
@@ -621,7 +615,7 @@ impl SDMMApp {
             self.inactive.push(r#mod.clone());
             self.active.remove(index);
         } else {
-            if self.active.iter().find(|m| m.mod_id == r#mod.mod_id).is_some() {
+            if self.active.iter().any(|m| m.mod_id == r#mod.mod_id) {
                 return;
             }
             let mods_path = if r#mod.mod_id != 2400 {
@@ -808,7 +802,7 @@ impl eframe::App for SDMMApp {
             Menus::Browse => self.browse(ctx),
             Menus::Downloading => self.downloads_display(ctx),
             Menus::Mods => self.mods_display(ctx),
-            Menus::Settings => self.settings_display(ctx)
+            Menus::Settings => self.settings_display(ctx),
         }
     }
 

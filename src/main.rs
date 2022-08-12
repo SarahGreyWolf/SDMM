@@ -1,4 +1,4 @@
-#![cfg_attr(debug_assertions, windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use interprocess::local_socket::LocalSocketStream;
 use std::env;
 use std::io;

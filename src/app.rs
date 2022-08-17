@@ -74,7 +74,7 @@ pub struct SDMMApp {
     needs_key: bool,
     downloads: HashMap<String, (usize, usize, usize, usize, bool)>,
     inactive: Vec<GameMod>,
-    active: Vec<GameMod>,
+    active: Vec<GameMod>
     // TODO: Add some kind of popups list that show
 }
 
@@ -146,7 +146,7 @@ impl SDMMApp {
             needs_key,
             downloads: HashMap::new(),
             inactive,
-            active,
+            active
         }
     }
 
@@ -705,6 +705,9 @@ impl SDMMApp {
         let files = &ctx.input().raw.dropped_files;
         for f in files {
             let file_path = f.path.clone().unwrap();
+            if let Some(ext) = file_path.extension() && ext != "zip" {
+                continue;
+            }
             let file_name = file_path.iter().last().unwrap().to_str().unwrap().to_string();
             if let Ok(mut ff) = File::open(&f.path.clone().unwrap()) {
                 match File::create(self.download_path.join(&file_name)) {

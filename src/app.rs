@@ -84,7 +84,7 @@ impl SDMMApp {
         fonts.font_data.insert(
             "CodeNewRoman".to_owned(),
             egui::FontData::from_static(include_bytes!(
-                "../assets/Code New Roman Bold Nerd Font Complete Windows Compatible.otf"
+                "../assets/Code_New_Roman_Bold_Nerd_Font/CodeNewRomanNerdFontMono-Bold.otf"
             ))
             .tweak(egui::FontTweak {
                 scale: 0.9,
